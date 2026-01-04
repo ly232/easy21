@@ -1,23 +1,8 @@
 '''Module for running Easy21 episodes.'''
 
-from enum import StrEnum
-from dataclasses import dataclass, field
-
 from game import Easy21
 from agent import Agent, AgentStatus
-
-class Action(StrEnum):
-    '''Defines the actions available to the player.'''
-    HIT = "hit"
-    STICK = "stick"
-
-
-@dataclass
-class Trajectory:
-    '''Models the trajectory of an episode.'''
-    states: list[tuple[int, int]] = field(default_factory=list)
-    actions: list[Action] = field(default_factory=list)
-    rewards: list[int] = field(default_factory=list)
+from control_strategy import ControlStrategy, RandomControlStrategy, State, Action
 
 
 class Episode:
@@ -30,36 +15,36 @@ class Episode:
     entities' states (i.e. both player and dealer collectively defines the state of the
     MDP). That said, the state is effectively a pair of (player's value, dealer's value).
     '''
-    def __init__(self):
+    def __init__(self, strategy: ControlStrategy=RandomControlStrategy()) -> None:
         self.game = Easy21()
         self.player = Agent(self.game)
         self.dealer = Agent(self.game)
+        self.strategy = strategy
 
-        self.trajectory = Trajectory()
-        self._update_state_trajectory()  # initial state
-
-    def _update_state_trajectory(self) -> None:
-        self.trajectory.states.append((self.player.value, self.dealer.value))
-
-    def _update_action_trajectory(self, action: Action) -> None:
-        self.trajectory.actions.append(action)
-
-    def _update_reward_trajectory(self, reward: int) -> None:
-        self.trajectory.rewards.append(reward)
+        self.trajectory: list[State|Action|int] = [
+            State(
+                player_value=self.player.value,
+                dealer_value=self.dealer.value,
+                player_status=self.player.status,
+                dealer_status=self.dealer.status
+            )
+        ]
 
     def is_terminal(self) -> bool:
         return self.player.status != AgentStatus.PLAYING \
             or self.dealer.status != AgentStatus.PLAYING
 
     def step(self, action: Action):
+        """Takes one step after _player_'s action."""
+
         if self.is_terminal():
             return  # No further actions possible.
-        self._update_action_trajectory(action)
+        self.trajectory.append(action)
         match action:
             case Action.HIT:
                 self.player.hit()
                 reward = -1 if self.player.status == AgentStatus.BUSTED else 0
-                self._update_reward_trajectory(reward)
+                self.trajectory.append(reward)
             case Action.STICK:
                 # If player sticks, dealer takes turn. Dealer always sticks on any sum
                 # of 17 or greater, and hits otherwise.
@@ -74,12 +59,29 @@ class Episode:
                     reward = 1
                 elif self.player.value != self.dealer.value:  # dealer sticked.
                     reward = 1 if self.player.value > self.dealer.value else -1
-                self._update_reward_trajectory(reward)
+                self.trajectory.append(reward)
             case _:
                 raise ValueError(f"Unknown action: {action}")
+        new_state = State(
+            player_value=self.player.value,
+            dealer_value=self.dealer.value,
+            player_status=self.player.status,
+            dealer_status=self.dealer.status
+        )
+        self.trajectory.append(new_state)
 
-    def state_value(self) -> int:
-        ...
-
-    def action_value(self, action: Action) -> int:
-        ...
+    def run(self) -> list[State|Action|int]:
+        '''Runs the episode until terminal state is reached.
+        
+        Returns the trajectory of the episode.
+        '''
+        while not self.is_terminal():
+            state = State(
+                player_value=self.player.value,
+                dealer_value=self.dealer.value,
+                player_status=self.player.status,
+                dealer_status=self.dealer.status
+            )
+            action = self.strategy.next_action(state)
+            self.step(action)
+        return self.trajectory

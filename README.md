@@ -37,12 +37,29 @@ classDiagram
         game
         dealer
         player
+        strategy
         step()
     }
     
     Episode "1" --> "1" Game
     Episode "1" --> "1" Player
     Episode "1" --> "1" Dealer
+
+    class ControlStrategy {
+        next_action()
+    }
+
+    clsas RandomControlStrategy
+    class MonteCarloControlStrategy {
+        n_counter
+        q_value
+        policy
+        policy_iteration()
+    }
+
+    RandomControlStrategy ..|> ControlStrategy
+    MonteCarloControlStrategy ..|> ControlStrategy
+    Episode "1" --> "1" ControlStrategy
 ```
 
 ## Monte Carlo Control
