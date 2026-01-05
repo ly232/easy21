@@ -1,5 +1,6 @@
 """Module for all available control strategies in Easy21."""
 
+from collections import defaultdict, Counter
 from enum import StrEnum
 from dataclasses import dataclass
 
@@ -12,15 +13,6 @@ import seaborn as sns
 
 # Hyperparameters.
 N0 = 100  # Used for epsilon-greedy. episilon = N0 / (N0 + N(s))
-
-
-def _initial_action_distribution() -> dict:
-    """Module-level factory returning the initial action probability dict.
-
-    Using a top-level function (instead of a local lambda) makes the
-    defaultdict pickling-safe.
-    """
-    return {Action.HIT: 0.5, Action.STICK: 0.5}
 
 
 @dataclass(frozen=True)
@@ -48,19 +40,33 @@ class Action(StrEnum):
     STICK = "stick"
 
 
+#
+# Module-level factory methods.
+# Using a top-level function (instead of a local lambda) makes the
+# defaultdict pickling-safe.
+#
+def _initial_action_distribution() -> dict:
+    return {Action.HIT: 0.5, Action.STICK: 0.5}
+
+def _float_defaultdict() -> dict[Action, float]:
+    return defaultdict(float)
+
+
 class Policy:
     '''Defines a policy mapping states to proability distribution of actions.'''
 
     # Conditional probability of actions for a given state.
-    distribution: pd.DataFrame = pd.DataFrame(columns=list(Action))
+    # Note: cannot use lambda because of pickling issues.
+    distribution: dict[State, dict[Action, float]] = defaultdict(_initial_action_distribution)
 
     def sample(self, state: State) -> Action:
         '''Samples an action based on the policy's distribution for the given state.'''
-        if state not in self.distribution.index:
+        if state not in self.distribution:
             # Fallback to uniform random if this state hasn't been explored before.
             return random.choice(list(Action))
-        probabilities = self.distribution.loc[state].fillna(0).tolist()
-        return random.choices(list(Action), weights=list(probabilities), k=1)[0]
+        actions = list(self.distribution[state].keys())
+        probabilities = list(self.distribution[state].values())
+        return random.choices(actions, weights=list(probabilities), k=1)[0]
 
 
 class ControlStrategy:
@@ -106,10 +112,8 @@ class MonteCarloControlStrategy(ControlStrategy):
 
     def __init__(self) -> None:
         # Monte Carlo control parameters.
-        # - index: states
-        # - columns: actions
-        self.n: pd.DataFrame = pd.DataFrame(columns=list(Action))
-        self.q: pd.DataFrame = pd.DataFrame(columns=list(Action))
+        self.n: dict[State, dict[Action, int]] = defaultdict(Counter)
+        self.q: dict[State, dict[Action, float]] = defaultdict(_float_defaultdict)
 
         # Initialize policy to uniform random.
         self.policy = Policy()
@@ -121,39 +125,22 @@ class MonteCarloControlStrategy(ControlStrategy):
         for i in range(0, len(trajectory) - 3, 3):
             state, action, reward = trajectory[i], trajectory[i+1], trajectory[i+2]
             gain += reward
-            # Note: cannot do self.n.at[state, action] = 0 directly due to pandas behavior.
-            # Pandas does not actually create a new row or column. Also Pandas df expects
-            # column to exist before index (row) assignment.
-            if action not in self.n.columns:
-                self.n[action] = 0
-            if state not in self.n.index:
-                self.n.loc[state] = 0
-            self.n.at[state, action] += 1
-            assert not pd.isna(self.n.at[state, action]), \
-                f"N value should not be NaN after update. State: {state}, Action: {action}"
-        if action not in self.q.columns:
-            self.q[action] = 0.0
-        if state not in self.q.index:
-            self.q.loc[state] = 0.0
-        current_q = self.q.at[state, action]
-        if pd.isna(current_q):
-            current_q = 0.0
-        alpha = 1.0 / self.n.at[state, action]
-        self.q.at[state, action] += alpha * (gain - current_q)
-        assert not pd.isna(self.q.at[state, action]), \
-            f"Q value should not be NaN after update. State: {state}, Action: {action}"
+            self.n[state][action] += 1
+        current_q = self.q[state][action]
+        alpha = 1.0 / self.n[state][action]
+        self.q[state][action] += alpha * (gain - current_q)
 
         # Policy improvement using episilon-greedy. Based on slide 11 in
         # https://davidstarsilver.wordpress.com/wp-content/uploads/2025/04/lecture-5-model-free-control-.pdf
-        new_distribution = pd.DataFrame(columns=list(Action))
-        for state in self.q.index:
-            best_action = self.q.loc[state].idxmax()
+        new_distribution = defaultdict(_initial_action_distribution)
+        for state in self.q.keys():
+            best_action = max(self.q[state], key=self.q[state].get)
             available_actions = list(Action)
             m = len(available_actions)
-            epsilon = N0 / (N0 + self.n.loc[state].max())
-            new_distribution.at[state, best_action] = epsilon / m + 1 - epsilon
+            epsilon = N0 / (N0 + max(self.n[state].values()))
+            new_distribution[state][best_action] = epsilon / m + 1 - epsilon
             for action in available_actions:
-                new_distribution.at[state, action] = epsilon / m
+                new_distribution[state][action] = epsilon / m
         self.policy.distribution =new_distribution
 
     def next_action(self, state: State) -> Action:
@@ -162,9 +149,12 @@ class MonteCarloControlStrategy(ControlStrategy):
     
     def get_plot_df(self) -> pd.DataFrame:
         '''Plots the optimal value function based on the learned Q values.'''
-        max_q = self.q.max(axis=1)
+        max_q = {
+            state: max(self.q[state].values())
+            for state in self.q.keys()
+        }
         plot_df = pd.DataFrame()
-        for state in max_q.index:
+        for state, max_action_value in max_q.items():
             player_value, dealer_value = state.player_value, state.dealer_value
-            plot_df.at[player_value, dealer_value] = max_q.at[state]
+            plot_df.at[player_value, dealer_value] = max_action_value
         return plot_df.sort_index().sort_index(axis=1)

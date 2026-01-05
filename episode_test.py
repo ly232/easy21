@@ -50,6 +50,5 @@ def test_episode_monte_carlo_strategy() -> None:
             episode = Episode(strategy=monte_carlo_strategy)
             trajectory = episode.run()
             monte_carlo_strategy.policy_iteration(trajectory=trajectory)
-        print(monte_carlo_strategy.q)
         monte_carlo_strategy.persist()
     monte_carlo_strategy.plot_optimal_value()
