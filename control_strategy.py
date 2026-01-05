@@ -4,9 +4,22 @@ from agent import AgentStatus
 from collections import defaultdict, Counter
 from enum import StrEnum
 from dataclasses import dataclass
+from typing import Any
 
 import pandas as pd
 import random
+import pickle
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+
+def _initial_action_distribution() -> dict:
+    """Module-level factory returning the initial action probability dict.
+
+    Using a top-level function (instead of a local lambda) makes the
+    defaultdict pickling-safe.
+    """
+    return {Action.HIT: 0.5, Action.STICK: 0.5}
 
 
 @dataclass(frozen=True)
@@ -14,15 +27,16 @@ class State:
     '''Defines the state of the Easy21 game.'''
     player_value: int
     dealer_value: int
-    player_status: AgentStatus
-    dealer_status: AgentStatus
+    # Design decision: we do not encode the status of player/dealer in the state.
+    # This reduces the state space size, also making action value plots visualizable.
+    # Downside is possibly slower convergence due to coarse state representations.
+    # player_status: AgentStatus
+    # dealer_status: AgentStatus
 
     def __str__(self) -> str:
         tokens = [
             str(self.player_value),
-            self.player_status.value,
             str(self.dealer_value),
-            self.dealer_status.value,
         ]
         return f'{":".join(tokens)}'
 
@@ -56,7 +70,27 @@ class ControlStrategy:
     def next_action(self, state: State) -> Action:
         """Decides the next action based on the strategy."""
         raise NotImplementedError()
+
+    def get_plot_df(self) -> pd.DataFrame:
+        '''Returns a DataFrame for plotting the learned Q values.'''
+        raise NotImplementedError()
     
+    def plot_optimal_value(self) -> None:
+        '''Plots the optimal value function based on learned Q values.'''
+        plt.figure(figsize=(10, 6))
+        plt.title(f'{self.__class__.__name__} Optimal Value Function')
+        sns.heatmap(self.get_plot_df(), cmap='viridis')
+        # Note that df's index (aka rows aka y axis) is player_value,
+        # columns (aka x axis) is dealer_value.
+        plt.xlabel('Dealer value')
+        plt.ylabel('Player value')
+        plt.savefig(f'{self.__class__.__name__}.png')
+        plt.show()
+    
+    def persist(self) -> None:
+        '''Persists learned results to disk.'''
+        with open(f'{self.__class__.__name__}.pkl', 'wb') as f:
+            pickle.dump(self, f)
 
 class RandomControlStrategy(ControlStrategy):
     """A control strategy that selects actions randomly."""
@@ -84,7 +118,7 @@ class MonteCarloControlStrategy(ControlStrategy):
         # Initialize policy to uniform random.
         self.policy = Policy(
             distribution=defaultdict(
-                lambda: {Action.HIT: 0.5, Action.STICK: 0.5}
+                _initial_action_distribution
             )
         )
 
@@ -105,7 +139,7 @@ class MonteCarloControlStrategy(ControlStrategy):
         
         # Policy improvement using episilon-greedy. Based on slide 11 in
         # https://davidstarsilver.wordpress.com/wp-content/uploads/2025/04/lecture-5-model-free-control-.pdf
-        new_distribution = defaultdict(lambda: defaultdict(float))
+        new_distribution = defaultdict(_initial_action_distribution)
         for state in self.q.index:
             best_action = self.q.loc[state].idxmax()
             available_actions = list(Action)
@@ -118,3 +152,12 @@ class MonteCarloControlStrategy(ControlStrategy):
     def next_action(self, state: State) -> Action:
         action = self.policy.sample(state)
         return action
+    
+    def get_plot_df(self) -> pd.DataFrame:
+        '''Plots the optimal value function based on the learned Q values.'''
+        max_q = self.q.max(axis=1)
+        plot_df = pd.DataFrame()
+        for state in max_q.index:
+            player_value, dealer_value = state.player_value, state.dealer_value
+            plot_df.at[player_value, dealer_value] = max_q.at[state]
+        return plot_df.sort_index().sort_index(axis=1)

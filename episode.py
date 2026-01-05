@@ -25,8 +25,6 @@ class Episode:
             State(
                 player_value=self.player.value,
                 dealer_value=self.dealer.value,
-                player_status=self.player.status,
-                dealer_status=self.dealer.status
             )
         ]
 
@@ -65,8 +63,6 @@ class Episode:
         new_state = State(
             player_value=self.player.value,
             dealer_value=self.dealer.value,
-            player_status=self.player.status,
-            dealer_status=self.dealer.status
         )
         self.trajectory.append(new_state)
 
@@ -79,8 +75,6 @@ class Episode:
             state = State(
                 player_value=self.player.value,
                 dealer_value=self.dealer.value,
-                player_status=self.player.status,
-                dealer_status=self.dealer.status
             )
             action = self.strategy.next_action(state)
             self.step(action)
