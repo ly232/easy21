@@ -1,6 +1,5 @@
 """Module for all available control strategies in Easy21."""
 
-from collections import defaultdict
 from enum import StrEnum
 from dataclasses import dataclass
 
@@ -49,21 +48,19 @@ class Action(StrEnum):
     STICK = "stick"
 
 
-@dataclass(frozen=True)
 class Policy:
     '''Defines a policy mapping states to proability distribution of actions.'''
 
     # Conditional probability of actions for a given state.
-    distribution: dict[State, dict[Action, float]]
+    distribution: pd.DataFrame = pd.DataFrame(columns=list(Action))
 
     def sample(self, state: State) -> Action:
         '''Samples an action based on the policy's distribution for the given state.'''
-        actions = self.distribution[state].keys()
-        if not actions:
+        if state not in self.distribution.index:
             # Fallback to uniform random if this state hasn't been explored before.
             return random.choice(list(Action))
-        probabilities = self.distribution[state].values()
-        return random.choices(list(actions), weights=list(probabilities), k=1)[0]
+        probabilities = self.distribution.loc[state].fillna(0).tolist()
+        return random.choices(list(Action), weights=list(probabilities), k=1)[0]
 
 
 class ControlStrategy:
@@ -109,15 +106,13 @@ class MonteCarloControlStrategy(ControlStrategy):
 
     def __init__(self) -> None:
         # Monte Carlo control parameters.
-        self.n: pd.DataFrame = pd.DataFrame()
-        self.q: pd.DataFrame = pd.DataFrame()
+        # - index: states
+        # - columns: actions
+        self.n: pd.DataFrame = pd.DataFrame(columns=list(Action))
+        self.q: pd.DataFrame = pd.DataFrame(columns=list(Action))
 
         # Initialize policy to uniform random.
-        self.policy = Policy(
-            distribution=defaultdict(
-                _initial_action_distribution
-            )
-        )
+        self.policy = Policy()
 
     def policy_iteration(self, trajectory: list[State|Action|int]) -> None:
         '''Updates the counters, Q values, and improved policy based on the trajectory.'''
@@ -150,16 +145,16 @@ class MonteCarloControlStrategy(ControlStrategy):
 
         # Policy improvement using episilon-greedy. Based on slide 11 in
         # https://davidstarsilver.wordpress.com/wp-content/uploads/2025/04/lecture-5-model-free-control-.pdf
-        new_distribution = defaultdict(_initial_action_distribution)
+        new_distribution = pd.DataFrame(columns=list(Action))
         for state in self.q.index:
             best_action = self.q.loc[state].idxmax()
             available_actions = list(Action)
             m = len(available_actions)
             epsilon = N0 / (N0 + self.n.loc[state].max())
-            new_distribution[state][best_action] = epsilon / m + 1 - epsilon
+            new_distribution.at[state, best_action] = epsilon / m + 1 - epsilon
             for action in available_actions:
-                new_distribution[state][action] = epsilon / m
-        self.policy = Policy(distribution=new_distribution)
+                new_distribution.at[state, action] = epsilon / m
+        self.policy.distribution =new_distribution
 
     def next_action(self, state: State) -> Action:
         action = self.policy.sample(state)
