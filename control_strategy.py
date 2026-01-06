@@ -1,8 +1,10 @@
 """Module for all available control strategies in Easy21."""
 
 from collections import defaultdict, Counter
+from collections.abc import Sequence
 from enum import StrEnum
 from dataclasses import dataclass
+from typing import final, override
 
 import pandas as pd
 import random
@@ -20,6 +22,7 @@ class State:
     '''Defines the state of the Easy21 game.'''
     player_value: int
     dealer_value: int
+    is_terminal: bool
     # Design decision: we do not encode the status of player/dealer in the state.
     # This reduces the state space size, also making action value plots visualizable.
     # Downside is possibly slower convergence due to coarse state representations.
@@ -67,14 +70,70 @@ class Policy:
         actions = list(self.distribution[state].keys())
         probabilities = list(self.distribution[state].values())
         return random.choices(actions, weights=list(probabilities), k=1)[0]
+    
+    def update(
+            self, 
+            states: Sequence[State], 
+            best_action: Action, 
+            epsilon: float) -> None:
+        '''Updates the policy's distribution using epsilon-greedy.'''
+        new_distribution = defaultdict(_initial_action_distribution)
+        for state in states:
+            available_actions = list(Action)
+            m = len(available_actions)
+            new_distribution[state][best_action] = epsilon / m + 1 - epsilon
+            for action in available_actions:
+                new_distribution[state][action] = epsilon / m
+        self.distribution = new_distribution
 
 
 class ControlStrategy:
-    """Abstract base class for control strategy."""
+    """Base class for control strategy."""
 
-    def next_action(self, state: State) -> Action:
-        """Decides the next action based on the strategy."""
-        raise NotImplementedError()
+    def __init__(self) -> None:
+        # Denotes the current trajectory. Note that if the same strategy object is reused over
+        # multiple episodes, this trajectory will be reset at the beginning of each episode.
+        self.trajectory: list[State|Action|int] = []
+
+        # Initialize policy to uniform random.
+        self.policy = Policy()
+
+    def observe(self, reward: int, new_state: State) -> None:
+        """Observes the current state of the environment.
+        
+        By default, simply record the latest state. Subclasses should override this method
+        to trigger policy iteration.
+        """
+        assert self.trajectory, 'Must call initialize(initial_state) first.'
+        assert isinstance(self.trajectory[-1], Action), \
+            'Unexpectedly called `strategy.observe()` when the latest trajectory entry ' \
+            f'{self.trajectory[-1]} is not an Action.'
+        self.trajectory.append(reward)
+        self.trajectory.append(new_state)
+
+    @final
+    def reset(self, initial_state: State) -> None:
+        """Resets the control strategy with the initial state."""
+        self.trajectory = [initial_state]
+
+    @final    
+    def next_action(self) -> Action:
+        '''Decides the next action based on the current policy and latest observed state.
+        
+        Returns:
+            The next Action to take, according to the current policy.
+
+        Raises:
+            AssertionError: If the latest trajectory entry is not a State.
+        '''
+        assert self.trajectory, 'Must call initialize(initial_state) first.'
+        last_state = self.trajectory[-1]
+        assert isinstance(last_state, State), \
+            'Unexpectedly called `strategy.next_action()` when the latest trajectory entry ' \
+            f'{last_state} is not a State.'
+        action = self.policy.sample(last_state)
+        self.trajectory.append(action)
+        return action
 
     def get_plot_df(self) -> pd.DataFrame:
         '''Returns a DataFrame for plotting the learned Q values.'''
@@ -97,12 +156,6 @@ class ControlStrategy:
         with open(f'{self.__class__.__name__}.pkl', 'wb') as f:
             pickle.dump(self, f)
 
-class RandomControlStrategy(ControlStrategy):
-    """A control strategy that selects actions randomly."""
-
-    def next_action(self, state: State) -> Action:
-        return random.choice(list(Action))
-
 
 class MonteCarloControlStrategy(ControlStrategy):
     """Implements the Monte Carlo based control strategy.
@@ -111,17 +164,17 @@ class MonteCarloControlStrategy(ControlStrategy):
     """
 
     def __init__(self) -> None:
+        super().__init__()
+
         # Monte Carlo control parameters.
         self.n: dict[State, dict[Action, int]] = defaultdict(Counter)
         self.q: dict[State, dict[Action, float]] = defaultdict(_float_defaultdict)
 
-        # Initialize policy to uniform random.
-        self.policy = Policy()
-
-    def policy_iteration(self, trajectory: list[State|Action|int]) -> None:
+    def _policy_iteration(self) -> None:
         '''Updates the counters, Q values, and improved policy based on the trajectory.'''
         # Policy evaluation using every-visit Monte Carlo.
         gain = 0
+        trajectory = self.trajectory
         for i in range(0, len(trajectory) - 3, 3):
             state, action, reward = trajectory[i], trajectory[i+1], trajectory[i+2]
             gain += reward
@@ -132,20 +185,21 @@ class MonteCarloControlStrategy(ControlStrategy):
 
         # Policy improvement using episilon-greedy. Based on slide 11 in
         # https://davidstarsilver.wordpress.com/wp-content/uploads/2025/04/lecture-5-model-free-control-.pdf
-        new_distribution = defaultdict(_initial_action_distribution)
-        for state in self.q.keys():
-            best_action = max(self.q[state], key=self.q[state].get)
-            available_actions = list(Action)
-            m = len(available_actions)
-            epsilon = N0 / (N0 + max(self.n[state].values()))
-            new_distribution[state][best_action] = epsilon / m + 1 - epsilon
-            for action in available_actions:
-                new_distribution[state][action] = epsilon / m
-        self.policy.distribution =new_distribution
+        self.policy.update(
+            self.q.keys(), 
+            best_action=max(self.q[state], key=self.q[state].get), 
+            epsilon=N0 / (N0 + max(self.n[state].values()))
+        )
 
-    def next_action(self, state: State) -> Action:
-        action = self.policy.sample(state)
-        return action
+    @override
+    def observe(self, reward: int, new_state: State) -> None:
+        """Update control parameters for terminal states only."""
+        super().observe(reward, new_state)
+
+        if not new_state.is_terminal:
+            return
+        # Apply MC policy iteration on completed episode.
+        self._policy_iteration()
     
     def get_plot_df(self) -> pd.DataFrame:
         '''Plots the optimal value function based on the learned Q values.'''
@@ -158,3 +212,25 @@ class MonteCarloControlStrategy(ControlStrategy):
             player_value, dealer_value = state.player_value, state.dealer_value
             plot_df.at[player_value, dealer_value] = max_action_value
         return plot_df.sort_index().sort_index(axis=1)
+
+
+class SarsaLambdaControlStrategy(ControlStrategy):
+    """Implements the Sarsa(λ) based control strategy.
+    
+    See slide 29 in https://davidstarsilver.wordpress.com/wp-content/uploads/2025/04/lecture-5-model-free-control-.pdf
+    Note that we're implementing the backward view of Sarsa(λ).
+    """
+
+    def __init__(self, lmda: float) -> None:
+        super().__init__()
+
+        # Sarsa(λ) control parameters.
+        self.lmda = lmda
+        self.e: dict[State, dict[Action, float]] = defaultdict(_float_defaultdict)
+        self.q: dict[State, dict[Action, float]] = defaultdict(_float_defaultdict)
+
+    def observe(self, state: State) -> None:
+        """Run Sarsa(λ) policy iteration for observed latest state."""
+        super().observe(state)
+
+        raise NotImplementedError("Sarsa(λ) control strategy is not yet implemented.")

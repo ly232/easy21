@@ -53,6 +53,7 @@ classDiagram
         player
         strategy
         step()
+        run()
     }
     
     Episode "1" --> "1" Game
@@ -60,21 +61,30 @@ classDiagram
     Episode "1" --> "1" Dealer
 
     class ControlStrategy {
+        trajectory
+        policy
+        reset()
+        observe()
         next_action()
+        get_plot_df()
+        plot_optimal_value()
     }
 
-    clsas RandomControlStrategy
     class MonteCarloControlStrategy {
         n_counter
         q_value
-        policy
-        policy_iteration()
+        _policy_iteration()
+        observe()
+        get_plot_df()
     }
 
-    RandomControlStrategy ..|> ControlStrategy
     MonteCarloControlStrategy ..|> ControlStrategy
     Episode "1" --> "1" ControlStrategy
 ```
+
+The `ControlStrategy` base class manages the common states and transition contracts across different kinds of strategies (e.g. MC, or TD-based Sarsa). It notably contains 2 state variables: `trajectory`, which records the currently active episodes running trajectory (this may be internally used by the policy iteration algorithm in MC or TD), and `policy`, which encapsulates a probability distribution of actions for any given state. This base class has 2 critical state transtion methods:
+1. `observe(reward, next_state)`, which is invoked by the active episode each time an action `a[t+1]` happens at state `s[t]` which results in reward `r[t+1]` and transtion to next state `s[t+1]`. This method may be overridden by MC or Sarsa to apply additional behavior, such as policy iteration updates.
+2. `next_action()`, this is a final non-overridable method, and simply outputs an action given the current state and current policy distribution.
 
 ## Monte Carlo Control
 

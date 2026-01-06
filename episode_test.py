@@ -5,7 +5,7 @@ altogether.
 """
 
 from episode import Episode, Action
-from control_strategy import RandomControlStrategy, MonteCarloControlStrategy
+from control_strategy import MonteCarloControlStrategy, SarsaLambdaControlStrategy
 from pathlib import Path
 
 import pandas as pd
@@ -18,26 +18,12 @@ pd.set_option('display.max_columns', None)
 pd.set_option('display.max_colwidth', None)
 
 
-def test_episode_playthrough_always_stick() -> None:
-    episode = Episode()
-    episode.step(Action.STICK)
-    assert episode.is_terminal()
-    print(episode.trajectory)
-
-
-def test_episode_playthrough_always_hit() -> None:
-    episode = Episode()
-    while not episode.is_terminal():
-        episode.step(Action.HIT)
-    assert episode.is_terminal()
-    print(episode.trajectory)
-
-
 def test_episode_playthrough_random_action() -> None:
     episode = Episode()
-    trajectory = episode.run()
+    episode.run()
     assert episode.is_terminal()
-    print(trajectory)
+    print(f'random strategy trajectory: {episode.strategy.trajectory}')
+
 
 def test_episode_monte_carlo_strategy() -> None:
     monte_carlo_strategy = MonteCarloControlStrategy()
@@ -46,9 +32,16 @@ def test_episode_monte_carlo_strategy() -> None:
         with open(filepath, 'rb') as f:
             monte_carlo_strategy = pickle.load(f)
     else:
-        for _ in tqdm.tqdm(range(10000)):
+        for _ in tqdm.tqdm(range(100000)):
             episode = Episode(strategy=monte_carlo_strategy)
-            trajectory = episode.run()
-            monte_carlo_strategy.policy_iteration(trajectory=trajectory)
+            episode.run()
         monte_carlo_strategy.persist()
+    # print(monte_carlo_strategy.trajectory)
+    # print(monte_carlo_strategy.get_plot_df())
     monte_carlo_strategy.plot_optimal_value()
+
+# def test_episode_sarsa_lambda_strategy() -> None:
+#     sarsa_lambda_strategy = SarsaLambdaControlStrategy(lmda=0.9)
+#     for _ in tqdm.tqdm(range(1000)):
+#         episode = Episode(strategy=sarsa_lambda_strategy)
+#         trajectory = episode.run()
