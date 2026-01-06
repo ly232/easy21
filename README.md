@@ -61,6 +61,8 @@ classDiagram
     Episode "1" --> "1" Dealer
 
     class ControlStrategy {
+        n_counter
+        q_value
         trajectory
         policy
         reset()
@@ -71,8 +73,6 @@ classDiagram
     }
 
     class MonteCarloControlStrategy {
-        n_counter
-        q_value
         _policy_iteration()
         observe()
         get_plot_df()
@@ -82,7 +82,7 @@ classDiagram
     Episode "1" --> "1" ControlStrategy
 ```
 
-The `ControlStrategy` base class manages the common states and transition contracts across different kinds of strategies (e.g. MC, or TD-based Sarsa). It notably contains 2 state variables: `trajectory`, which records the currently active episodes running trajectory (this may be internally used by the policy iteration algorithm in MC or TD), and `policy`, which encapsulates a probability distribution of actions for any given state. This base class has 2 critical state transtion methods:
+The `ControlStrategy` base class manages the common states and transition contracts across different kinds of strategies (e.g. MC, or TD-based Sarsa). It notably contains 4 state variables: `n`, which counts state/action pair visits, `q`, which defines action value function, `trajectory`, which records the currently active episodes running trajectory (this may be internally used by the policy iteration algorithm in MC or TD), and `policy`, which encapsulates a probability distribution of actions for any given state. This base class has 2 critical state transtion methods:
 1. `observe(reward, next_state)`, which is invoked by the active episode each time an action `a[t+1]` happens at state `s[t]` which results in reward `r[t+1]` and transtion to next state `s[t+1]`. This method may be overridden by MC or Sarsa to apply additional behavior, such as policy iteration updates.
 2. `next_action()`, this is a final non-overridable method, and simply outputs an action given the current state and current policy distribution.
 
@@ -95,5 +95,9 @@ See `control_strategy.MonteCarloControlStrategy`.
 Note that dealer's value never exceeds 10, because dealer only draws once at start, then wait until player terminates, at which point whatever dealer does next will end up in terminal state. IOW, dealer value exceeds 10 only at terminal state, but the Q action-value function only evaluates on each (s_t, a_t, r_t) triplets, always excluding the final terminal state.
 
 ## TD Learning
+
+See `control_strategy.SarsaLambdaControlStrategy`.
+
+![Learned Q-value heatmap](SarsaLambdaControlStrategy.png)
 
 ## Linear Function Approximation

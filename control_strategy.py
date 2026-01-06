@@ -95,6 +95,10 @@ class ControlStrategy:
         # multiple episodes, this trajectory will be reset at the beginning of each episode.
         self.trajectory: list[State|Action|int] = []
 
+        # Common control parameters.
+        self.q: dict[State, dict[Action, float]] = defaultdict(_float_defaultdict)
+        self.n: dict[State, dict[Action, int]] = defaultdict(Counter)
+
         # Initialize policy to uniform random.
         self.policy = Policy()
 
@@ -133,23 +137,73 @@ class ControlStrategy:
             f'{last_state} is not a State.'
         action = self.policy.sample(last_state)
         self.trajectory.append(action)
+        self.n[last_state][action] += 1
+        self.post_action_hook()
         return action
+    
+    def post_action_hook(self) -> None:
+        '''A hook method called immediately after deciding the next action.
+
+        Subclasses may override this method to implement custom behavior.
+        By default, this method does nothing.
+        '''
+        assert isinstance(self.trajectory[-1], Action), \
+            'Unexpectedly called `strategy.post_action_hook()` when the latest trajectory entry ' \
+            f'{self.trajectory[-1]} is not an Action.'
+        pass
 
     def get_plot_df(self) -> pd.DataFrame:
-        '''Returns a DataFrame for plotting the learned Q values.'''
-        raise NotImplementedError()
+        '''Plots the optimal value function based on the learned Q values.'''
+        max_q = {
+            state: max(self.q[state].values())
+            for state in self.q.keys()
+        }
+        plot_df = pd.DataFrame()
+        for state, max_action_value in max_q.items():
+            player_value, dealer_value = state.player_value, state.dealer_value
+            plot_df.at[player_value, dealer_value] = max_action_value
+        return plot_df.sort_index().sort_index(axis=1)
     
-    def plot_optimal_value(self) -> None:
-        '''Plots the optimal value function based on learned Q values.'''
-        plt.figure(figsize=(10, 6))
-        plt.title(f'{self.__class__.__name__} Optimal Value Function')
-        sns.heatmap(self.get_plot_df(), cmap='viridis')
-        # Note that df's index (aka rows aka y axis) is player_value,
-        # columns (aka x axis) is dealer_value.
-        plt.xlabel('Dealer value')
-        plt.ylabel('Player value')
-        plt.savefig(f'{self.__class__.__name__}.png')
-        plt.show()
+    def plot_optimal_value(self, ax=None, show: bool = False) -> None:
+        '''Plots the optimal value function based on learned Q values.
+
+        Args:
+            ax: Optional matplotlib Axes to draw into. If None, a new figure
+                and axes will be created.
+            show: If True, call `plt.show()` after plotting.
+        '''
+        plot_df = self.get_plot_df()
+
+        if ax is None:
+            fig, ax = plt.subplots(figsize=(10, 6))
+        else:
+            fig = ax.figure
+
+        if plot_df.empty:
+            ax.set_title(f'{self.__class__.__name__} Optimal Value Function')
+            ax.set_xlabel('Dealer value')
+            ax.set_ylabel('Player value')
+            # Save an empty figure so test artifacts remain consistent.
+            fig.tight_layout()
+            fig.savefig(f'{self.__class__.__name__}.png')
+            if show:
+                plt.show()
+            return
+
+        # Ensure rows (player) and columns (dealer) are sorted ascending
+        plot_df = plot_df.sort_index().sort_index(axis=1)
+
+        # seaborn heatmap expects numeric indices/columns; convert if necessary
+        sns.heatmap(plot_df, cmap='viridis', ax=ax, cbar=True)
+
+        ax.set_title(f'{self.__class__.__name__} Optimal Value Function')
+        ax.set_xlabel('Dealer value')
+        ax.set_ylabel('Player value')
+
+        fig.tight_layout()
+        fig.savefig(f'{self.__class__.__name__}.png')
+        if show:
+            plt.show()
     
     def persist(self) -> None:
         '''Persists learned results to disk.'''
@@ -166,22 +220,16 @@ class MonteCarloControlStrategy(ControlStrategy):
     def __init__(self) -> None:
         super().__init__()
 
-        # Monte Carlo control parameters.
-        self.n: dict[State, dict[Action, int]] = defaultdict(Counter)
-        self.q: dict[State, dict[Action, float]] = defaultdict(_float_defaultdict)
-
     def _policy_iteration(self) -> None:
         '''Updates the counters, Q values, and improved policy based on the trajectory.'''
         # Policy evaluation using every-visit Monte Carlo.
-        gain = 0
         trajectory = self.trajectory
+        gain = trajectory[-2]  # for easy21, only the final reward is non-zero.
         for i in range(0, len(trajectory) - 3, 3):
-            state, action, reward = trajectory[i], trajectory[i+1], trajectory[i+2]
-            gain += reward
-            self.n[state][action] += 1
-        current_q = self.q[state][action]
-        alpha = 1.0 / self.n[state][action]
-        self.q[state][action] += alpha * (gain - current_q)
+            state, action = trajectory[i], trajectory[i+1]
+            q = self.q[state][action]
+            alpha = 1.0 / self.n[state][action]
+            self.q[state][action] += alpha * (gain - q)
 
         # Policy improvement using episilon-greedy. Based on slide 11 in
         # https://davidstarsilver.wordpress.com/wp-content/uploads/2025/04/lecture-5-model-free-control-.pdf
@@ -200,18 +248,6 @@ class MonteCarloControlStrategy(ControlStrategy):
             return
         # Apply MC policy iteration on completed episode.
         self._policy_iteration()
-    
-    def get_plot_df(self) -> pd.DataFrame:
-        '''Plots the optimal value function based on the learned Q values.'''
-        max_q = {
-            state: max(self.q[state].values())
-            for state in self.q.keys()
-        }
-        plot_df = pd.DataFrame()
-        for state, max_action_value in max_q.items():
-            player_value, dealer_value = state.player_value, state.dealer_value
-            plot_df.at[player_value, dealer_value] = max_action_value
-        return plot_df.sort_index().sort_index(axis=1)
 
 
 class SarsaLambdaControlStrategy(ControlStrategy):
@@ -229,8 +265,23 @@ class SarsaLambdaControlStrategy(ControlStrategy):
         self.e: dict[State, dict[Action, float]] = defaultdict(_float_defaultdict)
         self.q: dict[State, dict[Action, float]] = defaultdict(_float_defaultdict)
 
-    def observe(self, state: State) -> None:
-        """Run Sarsa(λ) policy iteration for observed latest state."""
-        super().observe(state)
+    def _policy_iteration(self) -> None:
+        """Run one round of Sarsa(λ) policy iteration based on the latest trajectory."""        
+        old_state, old_action, reward, new_state, new_action = \
+            self.trajectory[-5], self.trajectory[-4], self.trajectory[-3], \
+                self.trajectory[-2], self.trajectory[-1]
+        delta = reward + self.q[new_state][new_action] - self.q[old_state][old_action]
+        self.e[old_state][old_action] += 1
+        alpha = 1.0 / self.n[new_state][new_action]
+        for state in self.q.keys():
+            for action in self.q[state].keys():
+                self.q[state][action] += alpha * delta * self.e[state][action]
+                self.e[state][action] *= self.lmda
 
-        raise NotImplementedError("Sarsa(λ) control strategy is not yet implemented.")
+    @override
+    def post_action_hook(self) -> None:
+        super().post_action_hook()
+        # Apply Sarsa(λ) policy iteration if trajectory has at least one round of
+        # (s, a, r, s', a')
+        if len(self.trajectory) >= 5:
+            self._policy_iteration()
