@@ -160,6 +160,8 @@ class ControlStrategy:
         }
         plot_df = pd.DataFrame()
         for state, max_action_value in max_q.items():
+            if state.is_terminal:
+                continue
             player_value, dealer_value = state.player_value, state.dealer_value
             plot_df.at[player_value, dealer_value] = max_action_value
         return plot_df.sort_index().sort_index(axis=1)

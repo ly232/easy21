@@ -68,3 +68,4 @@ class Episode:
         while not self.is_terminal():
             action = self.strategy.next_action()
             self.step(action)
+        self.strategy.next_action()  # One last action call to collect final reward.

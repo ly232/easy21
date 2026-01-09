@@ -10,10 +10,13 @@ Note that if a `.pkl` file already exists for certainnig control algorithm, test
 
 ```bash
 # Run everything:
-uv run pytest episode_test.py -s
+rm *.pkl & uv run pytest episode_test.py -s
 
 # Run Monte Carlo control:
-uv run pytest episode_test.py::test_episode_monte_carlo_strategy -s
+rm MonteCarloControlStrategy.pkl & uv run pytest episode_test.py::test_episode_monte_carlo_strategy -s
+
+# Run Sarsa Lambda control:
+rm SarsaLambdaControlStrategy.pkl & uv run pytest episode_test.py::test_episode_sarsa_lambda_strategy -s
 ```
 
 ## Code Structure
@@ -96,8 +99,14 @@ Note that dealer's value never exceeds 10, because dealer only draws once at sta
 
 ## TD Learning
 
-See `control_strategy.SarsaLambdaControlStrategy`.
+See `control_strategy.SarsaLambdaControlStrategy`. A quick implementation note to call out: despite the algorithm is named `SARSA`, in practice when agent starts at state S and takes action A, it gets immediate feedbacks for both R and S *in parallel*, and in implementation, the `strategy` and `environment` only communicates by having the environment `episode` invoking `strategy.next_action()`, and rely on `strategy` to internally call back the `post_action_hook()` to collect rewards, then the `episode` environment transitions to next state (they can be reasoned to happen in paralle, though the program itself is single-threaded). This means if stragety tells episode to take action a at time t and that leads to terminal state, the hook invoked at time t won't know whether the new state is terminal yet, and therefore will still see immediate reward of 0. Then, at t+1, we do have a non-zero state, but that's only attributed to the terminal state at t+1. If we don't take another action at time t+1, `post_action_hook()` won't be triggered again, and that will make the action value fuction always evaluate to 0 for all state-action pairs. Thus, in `Episode.run()`, we always invoke `strategy.next_action()` one last time to collect the final reward.
 
+With 100000 episodes (same as Monte Carlo):
 ![Learned Q-value heatmap](SarsaLambdaControlStrategy.png)
+
+With 1000 episodes:
+![Learned Q-value heatmap](SarsaLambdaControlStrategy_1000_iterations.png)
+
+Results are notably higher. This is expected, because TD-based methods are generally higher bias and lower variance, though with enough iterations is expected to converge to the same optimal policy as Monte Carlo based methods.
 
 ## Linear Function Approximation

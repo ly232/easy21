@@ -73,7 +73,7 @@ def test_episode_sarsa_lambda_strategy(lmda, sarsa_figure) -> None:
         with open(filepath, 'rb') as f:
             sarsa_lambda_strategy = pickle.load(f)
     else:
-        for _ in tqdm.tqdm(range(1000)):
+        for _ in tqdm.tqdm(range(100000)):
             episode = Episode(strategy=sarsa_lambda_strategy)
             episode.run()
         sarsa_lambda_strategy.persist()
