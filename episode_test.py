@@ -5,11 +5,8 @@ altogether.
 """
 
 from episode import Episode, Action
-from control_strategy import MonteCarloControlStrategy, SarsaLambdaControlStrategy, State, Action
+from control_strategy import MonteCarloControlStrategy, SarsaLambdaControlStrategy, LinearFunctionApproximationSarsaLambdaControlStrategy, State, Action
 from pathlib import Path
-from functools import cache
-from copy import deepcopy
-from concurrent.futures import ThreadPoolExecutor
 
 import pandas as pd
 import pickle
@@ -86,7 +83,8 @@ def test_episode_sarsa_lambda_strategy(lmda, sarsa_figure) -> None:
     # print(sarsa_lambda_strategy.get_plot_df())
     sarsa_lambda_strategy.plot_optimal_value(ax=ax, show=False)
 
-def test_mse_sarsa_lambda_strategy() -> None:
+@pytest.mark.parametrize("use_tabular", [True, False])
+def test_mse_sarsa_lambda_strategy(use_tabular) -> None:
     """Generates MSE per λ value against Sarsa(λ) after 1k episodes.
     
     Uses MC 100K-eisode result as ground truth.
@@ -101,7 +99,6 @@ def test_mse_sarsa_lambda_strategy() -> None:
     
     def compute_mse(q1, q2) -> float:
         """Computes MSE between two Q value dictionaries."""
-        q1, q2 = deepcopy(q1), deepcopy(q2)
         mse = 0.0
         count = 0
         states = set(q1.keys()).union(set(q2.keys()))
@@ -123,13 +120,26 @@ def test_mse_sarsa_lambda_strategy() -> None:
         
         Returns a sequence of MSE errors indexed by episode number.
         """
-        sarsa_lambda_strategy = SarsaLambdaControlStrategy(lmda=lmda)
+        sarsa_lambda_strategy = \
+            SarsaLambdaControlStrategy(lmda=lmda) if use_tabular \
+            else LinearFunctionApproximationSarsaLambdaControlStrategy(lmda=lmda)
         mses = []
         ground_truth_q = load_ground_truth()
-        for _ in tqdm.tqdm(range(num_episodes), desc=f'Computing MSE for λ={lmda}'):
+        for _ in tqdm.tqdm(
+            range(num_episodes), 
+            desc=f'Computing MSE for λ={lmda}, {"tabular" if use_tabular else "func-approx"}'):
             episode = Episode(strategy=sarsa_lambda_strategy)
             episode.run()
-            mses.append(compute_mse(sarsa_lambda_strategy.q, ground_truth_q))
+            if use_tabular:
+                estimated_q = sarsa_lambda_strategy.q
+            else:
+                estimated_q = {}
+                for state in ground_truth_q.keys():
+                    estimated_q[state] = {
+                        Action.HIT: sarsa_lambda_strategy.estimate_q(state, Action.HIT),
+                        Action.STICK: sarsa_lambda_strategy.estimate_q(state, Action.STICK),
+                    }
+            mses.append(compute_mse(estimated_q, ground_truth_q))
         return mses
     
     # Generate plot for final MSE per λ value.
@@ -144,7 +154,9 @@ def test_mse_sarsa_lambda_strategy() -> None:
     ax.set_ylabel('Mean Squared Error')
     ax.legend()
     fig.tight_layout()
-    fig.savefig("SarsaLambdaControlStrategy_MSE.png")
+    fig.savefig("SarsaLambdaControlStrategy_MSE.png" 
+                if use_tabular 
+                else "SarsaLambdaControlStrategy_FuncApprox_MSE.png")
 
     # Generate final MSE per λ value.
     fig2, ax2 = plt.subplots(figsize=(8, 6))
@@ -154,4 +166,6 @@ def test_mse_sarsa_lambda_strategy() -> None:
     ax2.set_xlabel('λ Value')
     ax2.set_ylabel('Final Mean Squared Error')
     fig2.tight_layout()
-    fig2.savefig("SarsaLambdaControlStrategy_Final_MSE.png")
+    fig2.savefig("SarsaLambdaControlStrategy_Final_MSE.png" 
+                 if use_tabular 
+                 else "SarsaLambdaControlStrategy_FuncApprox_Final_MSE.png")

@@ -4,12 +4,16 @@ from collections import defaultdict, Counter
 from collections.abc import Sequence
 from enum import StrEnum
 from dataclasses import dataclass
+from functools import cache
+from itertools import product
+from jaxtyping import Float
 from typing import final, override
 
 import pandas as pd
 import random
 import pickle
 import matplotlib.pyplot as plt
+import numpy as np
 import seaborn as sns
 
 
@@ -274,7 +278,12 @@ class SarsaLambdaControlStrategy(ControlStrategy):
                 self.trajectory[-2], self.trajectory[-1]
         delta = reward + self.q[new_state][new_action] - self.q[old_state][old_action]
         self.e[old_state][old_action] += 1
-        # alpha = 1.0 / self.n[new_state][new_action]
+        # Note: unlike MC which uses alpha = 1.0 / self.n[new_state][new_action], for TD-based
+        # methods we use a fixed small alpha. This is because TD has lower variance and higher
+        # bias, so diminishing step size risks not correcting the bias in later episodes. OTOH,
+        # MC is more suited for dinimishing step size because it suffers more from variance
+        # than bias, and as MC sees more episodes, sample size increases thus stablizes the
+        # variance more, at which point smaller step size is better to avoid overshooting.
         alpha = 0.01
         for state in self.q.keys():
             for action in self.q[state].keys():
@@ -292,3 +301,76 @@ class SarsaLambdaControlStrategy(ControlStrategy):
         # (s, a, r, s', a')
         if len(self.trajectory) >= 5:
             self._policy_iteration()
+
+class LinearFunctionApproximationSarsaLambdaControlStrategy(ControlStrategy):
+    """Implements a control strategy using linear function approximation.
+    
+    This uses the Sarsa(λ) algorithm to *estimate* for the true target, then it uses
+    linear function approximation to *approximate* the action-value function. Note
+    that the action-value is never materialized into a table (this is the whoe point
+    of function approximation after all). The Sarsa(λ) algorithm relies on the function
+    approximation to estimate its action values with weights at the current step.
+    """
+
+    def __init__(self, lmda: float) -> None:
+        super().__init__()
+        self.lmda = lmda
+
+        # Unlike MC and Sarsa, we don't explicitly materialize tables for Q and N for function
+        # approximation strategy. Instead we use a weight vector to estimate action-value function,
+        # where the weights are trained via gradient descent using a linear model against one-hot
+        # encoded feature vectors (see self._feature_vector below).
+        self.weights: Float[np.ndarray, '36'] = np.zeros(36)
+
+        # Eligibility trace vector. Note that unlike the tabular Sarsa(λ) where eligibility tracks the
+        # entire state-action space, here because we mapped the |S|*|A| space into a fixed 36-dimensional
+        # vector space, we just need to track the eligibility in that vector space.
+        self.e: Float[np.ndarray, '36'] = np.zeros(36)
+
+    @cache
+    def _feature_vector(self, state: State, action: Action) -> Float[np.ndarray, '36']:
+        """Generates the feature vector for the given state and action."""
+        dealer_cuboids = [(1, 4), (4, 7), (7, 10)]
+        player_cuboids = [(1, 6), (4, 9), (7, 12), (10, 15), (13, 18), (16, 21)]
+        features = list(product(dealer_cuboids, player_cuboids, Action))
+        feature_vector = np.zeros(len(features), dtype=float)
+        for i, feature in enumerate(features):
+            (d_start, d_end), (p_start, p_end), a = feature
+            if d_start <= state.dealer_value <= d_end \
+                and p_start <= state.player_value <= p_end \
+                    and a == action:
+                feature_vector[i] = 1.0
+        return feature_vector
+
+    def estimate_q(self, state: State, action: Action) -> float:
+        """Estimates the action-value for the given state and action using current weights."""
+        phi = self._feature_vector(state, action)
+        return float(np.dot(self.weights, phi))
+
+    @override
+    def post_action_hook(self) -> None:
+        # Similar to Sarsa(λ), function approximation update weights after each action.
+        super().post_action_hook()
+        if len(self.trajectory) >= 5:
+            self._policy_iteration()
+
+    def _policy_iteration(self) -> None:
+        """Run one round of policy iteration using linear function approximation.
+        
+        See slide 24 in https://davidstarsilver.wordpress.com/wp-content/uploads/2025/04/lecture-6-value-function-approximation-.pdf.
+        We implement the backward view of Sarsa(λ) with eligibility traces.
+        """
+        old_state, old_action, reward, new_state, new_action = \
+            self.trajectory[-5], self.trajectory[-4], self.trajectory[-3], \
+                self.trajectory[-2], self.trajectory[-1]
+        delta = reward + self.estimate_q(new_state, new_action) - self.estimate_q(old_state, old_action)
+        grad = self._feature_vector(old_state, old_action)
+        self.e = self.lmda * self.e + grad
+        alpha = 0.01  # Fixed small step size for TD methods.
+        delta_w = alpha * delta * self.e
+        # print(delta_w)
+        self.weights += delta_w
+
+        # ATTN: Eligibility trace does not carry over to next episode.
+        if new_state.is_terminal:
+            self.e = np.zeros(36)
