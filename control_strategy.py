@@ -274,11 +274,16 @@ class SarsaLambdaControlStrategy(ControlStrategy):
                 self.trajectory[-2], self.trajectory[-1]
         delta = reward + self.q[new_state][new_action] - self.q[old_state][old_action]
         self.e[old_state][old_action] += 1
-        alpha = 1.0 / self.n[new_state][new_action]
+        # alpha = 1.0 / self.n[new_state][new_action]
+        alpha = 0.01
         for state in self.q.keys():
             for action in self.q[state].keys():
                 self.q[state][action] += alpha * delta * self.e[state][action]
                 self.e[state][action] *= self.lmda
+    
+        # ATTN: Eligibility trace does not carry over to next episode.
+        if new_state.is_terminal:
+            self.e = defaultdict(_float_defaultdict)
 
     @override
     def post_action_hook(self) -> None:

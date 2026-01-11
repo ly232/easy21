@@ -17,6 +17,9 @@ rm MonteCarloControlStrategy.pkl & uv run pytest episode_test.py::test_episode_m
 
 # Run Sarsa Lambda control:
 rm SarsaLambdaControlStrategy.pkl & uv run pytest episode_test.py::test_episode_sarsa_lambda_strategy -s
+
+# Run Sarsa Lambda control for MSE plot:
+uv run pytest episode_test.py::test_mse_sarsa_lambda_strategy -s
 ```
 
 ## Code Structure
@@ -91,6 +94,12 @@ The `ControlStrategy` base class manages the common states and transition contra
 
 ## Monte Carlo Control
 
+Command to reproduce:
+
+```python
+rm MonteCarloControlStrategy.pkl & uv run pytest episode_test.py::test_episode_monte_carlo_strategy -s
+```
+
 See `control_strategy.MonteCarloControlStrategy`.
 
 ![Learned Q-value heatmap](MonteCarloControlStrategy.png)
@@ -99,14 +108,26 @@ Note that dealer's value never exceeds 10, because dealer only draws once at sta
 
 ## TD Learning
 
+Command to reproduce:
+
+```python
+uv run pytest episode_test.py::test_mse_sarsa_lambda_strategy -s
+```
+
 See `control_strategy.SarsaLambdaControlStrategy`. A quick implementation note to call out: despite the algorithm is named `SARSA`, in practice when agent starts at state S and takes action A, it gets immediate feedbacks for both R and S *in parallel*, and in implementation, the `strategy` and `environment` only communicates by having the environment `episode` invoking `strategy.next_action()`, and rely on `strategy` to internally call back the `post_action_hook()` to collect rewards, then the `episode` environment transitions to next state (they can be reasoned to happen in paralle, though the program itself is single-threaded). This means if stragety tells episode to take action a at time t and that leads to terminal state, the hook invoked at time t won't know whether the new state is terminal yet, and therefore will still see immediate reward of 0. Then, at t+1, we do have a non-zero state, but that's only attributed to the terminal state at t+1. If we don't take another action at time t+1, `post_action_hook()` won't be triggered again, and that will make the action value fuction always evaluate to 0 for all state-action pairs. Thus, in `Episode.run()`, we always invoke `strategy.next_action()` one last time to collect the final reward.
 
-With 100000 episodes (same as Monte Carlo):
-![Learned Q-value heatmap](SarsaLambdaControlStrategy.png)
+To compute the MSE, we use the 100000-episodes results from Monte Carlo control as the ground truth, due to (a) Bellman optimality operator's contraction property, and (b) stocastic approximation convergence between MC and TD (both form Robbins-Monro sequence and satisfies GLIE property, as per slide 23 in https://davidstarsilver.wordpress.com/wp-content/uploads/2025/04/lecture-5-model-free-control-.pdf). Results are as follows:
 
-With 1000 episodes:
-![Learned Q-value heatmap](SarsaLambdaControlStrategy_1000_iterations.png)
+![MSE per lambda](SarsaLambdaControlStrategy_MSE.png)
 
-Results are notably higher. This is expected, because TD-based methods are generally higher bias and lower variance, though with enough iterations is expected to converge to the same optimal policy as Monte Carlo based methods.
+There are 2 crucial notes, one functional, one tuning:
+1. [Functional] the eligibility trace does NOT carry over to new episodes, so by the time TD strategy reaches a terminal state, the eligibility trace must be reinitialized. This is because eligibility trace puts a blame on the current encountered states trajectory to adjust the final reward, so it's tied to per-episode trajectory.
+2. [Non-functional] the alpha step size, unlike Monte Carlo, appears more robust to be treated as a constant 0.01 rather than dynamically adjustment. In fact, if we have `alpha = 1.0 / self.n[new_state][new_action]`, we would observe the following learning curve instead, with noticibly slower convergence rate:
+
+![MSE per lambda with dynamic step size](SarsaLambdaControlStrategy_MSE_dynamic_alpha.png)
+
+Finally, we could also plot the *final* MSE for each λ:
+
+![Final MSE vs λ](SarsaLambdaControlStrategy_Final_MSE.png)
 
 ## Linear Function Approximation
