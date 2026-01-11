@@ -122,7 +122,7 @@ To compute the MSE, we use the 100000-episodes results from Monte Carlo control 
 
 There are 2 crucial notes, one functional, one tuning:
 1. [Functional] the eligibility trace does NOT carry over to new episodes, so by the time TD strategy reaches a terminal state, the eligibility trace must be reinitialized. This is because eligibility trace puts a blame on the current encountered states trajectory to adjust the final reward, so it's tied to per-episode trajectory.
-2. [Non-functional] the alpha step size, unlike Monte Carlo, appears more robust to be treated as a constant 0.01 rather than dynamically adjustment. In fact, if we have `alpha = 1.0 / self.n[new_state][new_action]`, we would observe the following learning curve instead, with noticibly slower convergence rate:
+2. [Non-functional] the alpha step size, unlike Monte Carlo, appears more robust to be treated as a constant 0.01 rather than dynamically adjustment. One intuition is that MC generally has higher variance and lower bias than TD, so normalizing by 1/N helps to mitigate the variance for longer trajectories and larger samples. OTOH, TD has higher bias and lower variance, so if we penalize new samples by 1/N normalization, it's harder to correct those bias. In fact, if we have `alpha = 1.0 / self.n[new_state][new_action]`, we would observe the following learning curve instead, with noticibly slower convergence rate:
 
 ![MSE per lambda with dynamic step size](SarsaLambdaControlStrategy_MSE_dynamic_alpha.png)
 
