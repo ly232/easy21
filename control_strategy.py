@@ -97,6 +97,9 @@ class ControlStrategy:
     """Base class for control strategy."""
 
     def __init__(self) -> None:
+        self.policy = Policy()
+        self.policy.strategy = self
+
         # Denotes the current trajectory. Note that if the same strategy object is reused over
         # multiple episodes, this trajectory will be reset at the beginning of each episode.
         self.trajectory: list[State|Action|int] = []
