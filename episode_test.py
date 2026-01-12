@@ -140,6 +140,7 @@ def test_mse_sarsa_lambda_strategy(use_tabular) -> None:
                         Action.STICK: sarsa_lambda_strategy.estimate_q(state, Action.STICK),
                     }
             mses.append(compute_mse(estimated_q, ground_truth_q))
+        # print(f'final policy: {sarsa_lambda_strategy.policy.distribution}')
         return mses
     
     # Generate plot for final MSE per λ value.

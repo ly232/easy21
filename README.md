@@ -152,7 +152,7 @@ Finally, we could also plot the *final* MSE for each λ:
 Command to reproduce (same as Sarsa(λ), because we use parametrized pytest so the same target covers both):
 
 ```bash
-uv run pytest episode_test.py::test_mse_function_approximation_strategy -s
+uv run pytest episode_test.py::test_mse_sarsa_lambda_strategy -s
 ```
 
 See `control_strategy.LinearFunctionApproximationSarsaLambdaControlStrategy`.
@@ -199,3 +199,8 @@ Computing MSE for λ=1.0, func-approx: 100%|████████████
 ![MSE per lambda](SarsaLambdaControlStrategy_FuncApprox_MSE.png)
 
 ![Final MSE vs λ](SarsaLambdaControlStrategy_FuncApprox_Final_MSE.png)
+
+## Future Exploration Topics:
+
+1. It appears always doing random policy without policy improvement during policy iteration actually converges faster for TD-based tabular and function approximation methods. Why?
+2. It appears function approximation performs better than tabular in MSE. Why?

@@ -61,34 +61,36 @@ def _float_defaultdict() -> dict[Action, float]:
 
 class Policy:
     '''Defines a policy mapping states to proability distribution of actions.'''
-
-    # Conditional probability of actions for a given state.
-    # Note: cannot use lambda because of pickling issues.
-    distribution: dict[State, dict[Action, float]] = defaultdict(_initial_action_distribution)
+    def __init__(self) -> None:
+        # Links back to owner control strategy to access Q values later.
+        self.strategy: 'ControlStrategy' = None
 
     def sample(self, state: State) -> Action:
-        '''Samples an action based on the policy's distribution for the given state.'''
-        if state not in self.distribution:
-            # Fallback to uniform random if this state hasn't been explored before.
-            return random.choice(list(Action))
-        actions = list(self.distribution[state].keys())
-        probabilities = list(self.distribution[state].values())
-        return random.choices(actions, weights=list(probabilities), k=1)[0]
-    
-    def update(
-            self, 
-            states: Sequence[State], 
-            best_action: Action, 
-            epsilon: float) -> None:
-        '''Updates the policy's distribution using epsilon-greedy.'''
-        new_distribution = defaultdict(_initial_action_distribution)
-        for state in states:
-            available_actions = list(Action)
-            m = len(available_actions)
-            new_distribution[state][best_action] = epsilon / m + 1 - epsilon
-            for action in available_actions:
-                new_distribution[state][action] = epsilon / m
-        self.distribution = new_distribution
+        raise NotImplementedError()
+
+    def sample(self, state: State) -> Action:
+        '''Samples an action based on the policy's distribution for the given state.
+        
+        Note since we do not materialize the state-action pairs, we use the linked
+        function approximation strategy to estimate the Q values for all actions
+        in the given state, then pick the best action with epsilon-greedy.
+        '''
+        action_values = {
+            action: self.strategy.estimate_q(state, action)
+            for action in Action
+        }
+        best_action = max(action_values, key=action_values.get)
+        epsilon = 0.01
+        if state in self.strategy.n:
+            epsilon = N0 / (N0 + max(self.strategy.n[state].values()))
+        m = len(Action)
+        probabilities = {
+            action: (epsilon / m + (1 - epsilon) if action == best_action else (epsilon / m))
+            for action in Action
+        }
+        actions = list(probabilities.keys())
+        weights = list(probabilities.values())
+        return random.choices(actions, weights=weights, k=1)[0]
 
 
 class ControlStrategy:
@@ -99,12 +101,10 @@ class ControlStrategy:
         # multiple episodes, this trajectory will be reset at the beginning of each episode.
         self.trajectory: list[State|Action|int] = []
 
-        # Common control parameters.
+        # Common control parameters. Note that these are only populated for tabular based control
+        # strategies; function approximation based strategies may choose to ignore these.
         self.q: dict[State, dict[Action, float]] = defaultdict(_float_defaultdict)
         self.n: dict[State, dict[Action, int]] = defaultdict(Counter)
-
-        # Initialize policy to uniform random.
-        self.policy = Policy()
 
     def observe(self, reward: int, new_state: State) -> None:
         """Observes the current state of the environment.
@@ -118,6 +118,14 @@ class ControlStrategy:
             f'{self.trajectory[-1]} is not an Action.'
         self.trajectory.append(reward)
         self.trajectory.append(new_state)
+
+    def estimate_q(self, state: State, action: Action) -> float:
+        """Estimates the action-value for the given state and action.
+        
+        By default, looks up the materialized Q table. Subclasses using function approximation
+        should override this method.
+        """
+        return self.q[state][action]
 
     @final
     def reset(self, initial_state: State) -> None:
@@ -141,7 +149,6 @@ class ControlStrategy:
             f'{last_state} is not a State.'
         action = self.policy.sample(last_state)
         self.trajectory.append(action)
-        self.n[last_state][action] += 1
         self.post_action_hook()
         return action
     
@@ -225,6 +232,8 @@ class MonteCarloControlStrategy(ControlStrategy):
 
     def __init__(self) -> None:
         super().__init__()
+        self.policy = Policy()
+        self.policy.strategy = self
 
     def _policy_iteration(self) -> None:
         '''Updates the counters, Q values, and improved policy based on the trajectory.'''
@@ -237,14 +246,6 @@ class MonteCarloControlStrategy(ControlStrategy):
             alpha = 1.0 / self.n[state][action]
             self.q[state][action] += alpha * (gain - q)
 
-        # Policy improvement using episilon-greedy. Based on slide 11 in
-        # https://davidstarsilver.wordpress.com/wp-content/uploads/2025/04/lecture-5-model-free-control-.pdf
-        self.policy.update(
-            self.q.keys(), 
-            best_action=max(self.q[state], key=self.q[state].get), 
-            epsilon=N0 / (N0 + max(self.n[state].values()))
-        )
-
     @override
     def observe(self, reward: int, new_state: State) -> None:
         """Update control parameters for terminal states only."""
@@ -254,6 +255,12 @@ class MonteCarloControlStrategy(ControlStrategy):
             return
         # Apply MC policy iteration on completed episode.
         self._policy_iteration()
+
+    @override
+    def post_action_hook(self) -> None:
+        super().post_action_hook()
+        last_state, last_action = self.trajectory[-2], self.trajectory[-1]
+        self.n[last_state][last_action] += 1
 
 
 class SarsaLambdaControlStrategy(ControlStrategy):
@@ -265,6 +272,8 @@ class SarsaLambdaControlStrategy(ControlStrategy):
 
     def __init__(self, lmda: float) -> None:
         super().__init__()
+        self.policy = Policy()
+        self.policy.strategy = self
 
         # Sarsa(λ) control parameters.
         self.lmda = lmda
@@ -285,11 +294,16 @@ class SarsaLambdaControlStrategy(ControlStrategy):
         # than bias, and as MC sees more episodes, sample size increases thus stablizes the
         # variance more, at which point smaller step size is better to avoid overshooting.
         alpha = 0.01
+        greedy_action: dict[State, tuple[float, Action]] = {}
         for state in self.q.keys():
             for action in self.q[state].keys():
                 self.q[state][action] += alpha * delta * self.e[state][action]
                 self.e[state][action] *= self.lmda
-    
+                if state not in greedy_action \
+                    or action not in greedy_action[state] \
+                        or self.q[state][action] > greedy_action[state][0]:
+                    greedy_action[state] = (self.q[state][action], action)
+
         # ATTN: Eligibility trace does not carry over to next episode.
         if new_state.is_terminal:
             self.e = defaultdict(_float_defaultdict)
@@ -297,6 +311,8 @@ class SarsaLambdaControlStrategy(ControlStrategy):
     @override
     def post_action_hook(self) -> None:
         super().post_action_hook()
+        last_state, last_action = self.trajectory[-2], self.trajectory[-1]
+        self.n[last_state][last_action] += 1
         # Apply Sarsa(λ) policy iteration if trajectory has at least one round of
         # (s, a, r, s', a')
         if len(self.trajectory) >= 5:
@@ -314,6 +330,8 @@ class LinearFunctionApproximationSarsaLambdaControlStrategy(ControlStrategy):
 
     def __init__(self, lmda: float) -> None:
         super().__init__()
+        self.policy = Policy()
+        self.policy.strategy = self
         self.lmda = lmda
 
         # Unlike MC and Sarsa, we don't explicitly materialize tables for Q and N for function
@@ -342,6 +360,7 @@ class LinearFunctionApproximationSarsaLambdaControlStrategy(ControlStrategy):
                 feature_vector[i] = 1.0
         return feature_vector
 
+    @override
     def estimate_q(self, state: State, action: Action) -> float:
         """Estimates the action-value for the given state and action using current weights."""
         phi = self._feature_vector(state, action)
