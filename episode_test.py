@@ -89,7 +89,7 @@ def test_mse_sarsa_lambda_strategy(use_tabular) -> None:
     
     Uses MC 100K-eisode result as ground truth.
     """
-    num_episodes = 1000
+    num_episodes = 100000
 
     def load_ground_truth() -> dict[State, dict[Action, float]]:
         filepath = Path('MonteCarloControlStrategy.pkl')

@@ -160,47 +160,13 @@ See `control_strategy.LinearFunctionApproximationSarsaLambdaControlStrategy`.
 Key implementation notes:
 1. Function approximation requires some companion estimator from tabular methods, but instead of physially materializing the action value table, we can use function approximation to estimate its value. IOW, the dependency is both ways, with different time step to break cycle: (1) function approximation invokes companion's total reward formula using its current weights to help estimate that total reward, then (2) inference total reward using its own weight without seeing the immediate reward. Then the diff (a scalar) is the error and can be used to define how far to descend in gradient.
 2. For native Sarsa(λ), eligibility trace is a matrix of state-action pairs mapping to some trace value. For function approximation with  Sarsa(λ), since we cannot materialize the table, we will use the weight vector's vector space (aka feature vector space) to track eligibility.
-3. Function approximiation generally gives 2x latency boost, while MSE errors appear on-par:
-
-```bash
-(easy21) ly232@ly232s-iMac-Pro easy21 % uv run pytest episode_test.py::test_mse_sarsa_lambda_strategy -s
-
-==================================================================================================== test session starts =====================================================================================================
-platform darwin -- Python 3.14.2, pytest-9.0.2, pluggy-1.6.0
-rootdir: /Users/ly232/github/easy21
-configfile: pyproject.toml
-plugins: jaxtyping-0.3.5
-collected 2 items                                                                                                                                                                                                            
-
-Computing MSE for λ=0.0, tabular: 100%|██████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 1000/1000 [00:01<00:00, 580.50it/s]
-Computing MSE for λ=0.1, tabular: 100%|██████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 1000/1000 [00:01<00:00, 610.04it/s]
-Computing MSE for λ=0.2, tabular: 100%|██████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 1000/1000 [00:01<00:00, 602.47it/s]
-Computing MSE for λ=0.3, tabular: 100%|██████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 1000/1000 [00:01<00:00, 620.24it/s]
-Computing MSE for λ=0.4, tabular: 100%|██████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 1000/1000 [00:01<00:00, 617.15it/s]
-Computing MSE for λ=0.5, tabular: 100%|██████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 1000/1000 [00:01<00:00, 612.62it/s]
-Computing MSE for λ=0.6, tabular: 100%|██████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 1000/1000 [00:01<00:00, 606.66it/s]
-Computing MSE for λ=0.7, tabular: 100%|██████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 1000/1000 [00:01<00:00, 620.43it/s]
-Computing MSE for λ=0.8, tabular: 100%|██████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 1000/1000 [00:01<00:00, 618.63it/s]
-Computing MSE for λ=0.9, tabular: 100%|██████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 1000/1000 [00:01<00:00, 621.37it/s]
-Computing MSE for λ=1.0, tabular: 100%|██████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 1000/1000 [00:01<00:00, 619.16it/s]
-Computing MSE for λ=0.0, func-approx: 100%|█████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 1000/1000 [00:00<00:00, 1119.58it/s]
-Computing MSE for λ=0.1, func-approx: 100%|█████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 1000/1000 [00:00<00:00, 1106.61it/s]
-Computing MSE for λ=0.2, func-approx: 100%|█████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 1000/1000 [00:00<00:00, 1117.76it/s]
-Computing MSE for λ=0.3, func-approx: 100%|█████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 1000/1000 [00:00<00:00, 1113.77it/s]
-Computing MSE for λ=0.4, func-approx: 100%|█████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 1000/1000 [00:00<00:00, 1081.45it/s]
-Computing MSE for λ=0.5, func-approx: 100%|█████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 1000/1000 [00:00<00:00, 1087.82it/s]
-Computing MSE for λ=0.6, func-approx: 100%|█████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 1000/1000 [00:00<00:00, 1101.48it/s]
-Computing MSE for λ=0.7, func-approx: 100%|█████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 1000/1000 [00:00<00:00, 1068.37it/s]
-Computing MSE for λ=0.8, func-approx: 100%|█████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 1000/1000 [00:00<00:00, 1082.06it/s]
-Computing MSE for λ=0.9, func-approx: 100%|█████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 1000/1000 [00:00<00:00, 1074.81it/s]
-Computing MSE for λ=1.0, func-approx: 100%|█████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 1000/1000 [00:00<00:00, 1047.48it/s]
-```
 
 ![MSE per lambda](SarsaLambdaControlStrategy_FuncApprox_MSE.png)
 
 ![Final MSE vs λ](SarsaLambdaControlStrategy_FuncApprox_Final_MSE.png)
 
-## Future Exploration Topics:
+Function approximation appears to perform better initially, but worse in the long run, when comparing against the tabular method. This is expected because tabular methods initially don't explore much, so most estimates are zero, whereas function approximation has better generalizations initially, which gave better estimates initially even for unvisited states. But as we get more episodes, tabular methods visit more states and their estimates are more accuate.
 
-1. It appears always doing random policy without policy improvement during policy iteration actually converges faster for TD-based tabular and function approximation methods. Why?
-2. It appears function approximation performs better than tabular in MSE. Why?
+## Other interesting findings:
+
+1. It appears always doing random policy without policy improvement during policy iteration actually converges faster for TD-based tabular and function approximation methods for initial iterations. One hypothesis is that initial TD errors have higher bias and therefore random policies might give more exploration than exploitation. But as we gather more episodes we do expect random policy error to stop improving and perform worse than policy improvement strategies.
