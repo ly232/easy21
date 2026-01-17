@@ -119,7 +119,7 @@ rm MonteCarloControlStrategy.pkl & uv run pytest episode_test.py::test_episode_m
 
 See `control_strategy.MonteCarloControlStrategy`.
 
-![Learned Q-value heatmap](MonteCarloControlStrategy.png)
+![Learned Q-value heatmap](figures/MonteCarloControlStrategy.png)
 
 Note that dealer's value never exceeds 10, because dealer only draws once at start, then wait until player terminates, at which point whatever dealer does next will end up in terminal state. IOW, dealer value exceeds 10 only at terminal state, but the Q action-value function only evaluates on each (s_t, a_t, r_t) triplets, always excluding the final terminal state.
 
@@ -137,13 +137,13 @@ To compute the MSE, we use the 100000-episodes results from Monte Carlo control 
 
 Results are as follows:
 
-![MSE per lambda](SarsaLambdaControlStrategy_MSE.png)
+![MSE per lambda](figures/SarsaLambdaControlStrategy_MSE.png)
 
 MSE initially increases, likely because unexplored initial states all have zero action-values, leading to initially high bias errors. But over more episodes the errors drop down.
 
 Finally, we could also plot the *final* MSE for each λ:
 
-![Final MSE vs λ](SarsaLambdaControlStrategy_Final_MSE.png)
+![Final MSE vs λ](figures/SarsaLambdaControlStrategy_Final_MSE.png)
 
 ## Linear Function Approximation with  Sarsa(λ)
 
@@ -159,12 +159,28 @@ Key implementation notes:
 1. Function approximation requires some companion estimator from tabular methods, but instead of physially materializing the action value table, we can use function approximation to estimate its value. IOW, the dependency is both ways, with different time step to break cycle: (1) function approximation invokes companion's total reward formula using its current weights to help estimate that total reward, then (2) inference total reward using its own weight without seeing the immediate reward. Then the diff (a scalar) is the error and can be used to define how far to descend in gradient.
 2. For native Sarsa(λ), eligibility trace is a matrix of state-action pairs mapping to some trace value. For function approximation with  Sarsa(λ), since we cannot materialize the table, we will use the weight vector's vector space (aka feature vector space) to track eligibility.
 
-![MSE per lambda](SarsaLambdaControlStrategy_FuncApprox_MSE.png)
+![MSE per lambda](figures/SarsaLambdaControlStrategy_FuncApprox_MSE.png)
 
-![Final MSE vs λ](SarsaLambdaControlStrategy_FuncApprox_Final_MSE.png)
+![Final MSE vs λ](figures/SarsaLambdaControlStrategy_FuncApprox_Final_MSE.png)
 
 Function approximation appears to perform better initially, but worse in the long run, when comparing against the tabular method. This is expected because tabular methods initially don't explore much, so most estimates are zero, whereas function approximation has better generalizations initially, which gave better estimates initially even for unvisited states. But as we get more episodes, tabular methods visit more states and their estimates are more accuate.
 
-## Other interesting findings:
+It appears always doing random policy without policy improvement during policy iteration actually converges faster for TD-based tabular and function approximation methods for initial iterations. One hypothesis is that initial TD errors have higher bias and therefore random policies might give more exploration than exploitation. But as we gather more episodes we do expect random policy error to stop improving and perform worse than policy improvement strategies.
 
-1. It appears always doing random policy without policy improvement during policy iteration actually converges faster for TD-based tabular and function approximation methods for initial iterations. One hypothesis is that initial TD errors have higher bias and therefore random policies might give more exploration than exploitation. But as we gather more episodes we do expect random policy error to stop improving and perform worse than policy improvement strategies.
+## Deepmind RL Environment API Integration
+
+See `dm_env_adapter.py` for integration with the [Deepmind RL environment API](https://github.com/google-deepmind/dm_env). Notable learnings:
+
+* Client needs to implement a subclass of `dm_env.Environment`, notably overriding 4 methods: `reset`, `step`, `observation_spec`, and `action_spec`.
+* The `*_spec` overrides define the data model for state and action, respectively.
+* Once the specs are defined, `reset` and `step` are a matter of invoking already-implemented `Episode` and `ControlStrategy` instances.
+* One additional logic is to translate internals of `Episode` and `ControlStrategy` into a canonical DTO called `dm_env.TimeStep`, which is a named tuple consisting of `step_type`, `reward`, `discount`, `observation`. See https://github.com/google-deepmind/dm_env/blob/master/docs/index.md for full documentation.
+* `dm_env` module provides static helpers to transition and terminate throughout the episode.
+
+Action-values learned after 100000 episodes (λ=0.5 for TD-based methods):
+
+![Deepmind RL Env API Simulation Monte Carlo](figures/Deepmind_RL_Env_MonteCarloControlStrategy.png)
+![Deepmind RL Env API Simulation Sarsa Lambda](figures/Deepmind_RL_Env_SarsaLambdaControlStrategy.png)
+![Deepmind RL Env API Simulation Linear Function Approximiation](figures/Deepmind_RL_Env_LinearFunctionApproximationSarsaLambdaControlStrategy.png)
+
+Similar to earlier findings, fuction approximation method typically performs worse.

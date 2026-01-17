@@ -12,6 +12,8 @@ from control_strategy import (
     State,
     Action,
 )
+from dm_env_adapter import DeepmindEnvironmentAdapter
+
 from pathlib import Path
 
 import pandas as pd

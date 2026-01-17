@@ -2,7 +2,7 @@
 
 from collections import defaultdict, Counter
 from collections.abc import Sequence
-from enum import StrEnum
+from enum import IntEnum
 from dataclasses import dataclass
 from functools import cache
 from itertools import product
@@ -15,6 +15,7 @@ import pickle
 import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
+import itertools
 
 
 # Hyperparameters.
@@ -31,8 +32,8 @@ class State:
     # Design decision: we do not encode the status of player/dealer in the state.
     # This reduces the state space size, also making action value plots visualizable.
     # Downside is possibly slower convergence due to coarse state representations.
-    # player_status: AgentStatus
-    # dealer_status: AgentStatus
+    # player_status: ParticipantStatus
+    # dealer_status: ParticipantStatus
 
     def __str__(self) -> str:
         tokens = [
@@ -42,11 +43,11 @@ class State:
         return f'{":".join(tokens)}'
 
 
-class Action(StrEnum):
+class Action(IntEnum):
     """Defines the actions available to the player."""
 
-    HIT = "hit"
-    STICK = "stick"
+    HIT = 0
+    STICK = 1
 
 
 #
@@ -182,7 +183,9 @@ class ControlStrategy:
             plot_df.at[player_value, dealer_value] = max_action_value
         return plot_df.sort_index().sort_index(axis=1)
 
-    def plot_optimal_value(self, ax=None, show: bool = False) -> None:
+    def plot_optimal_value(
+        self, ax=None, show: bool = False, save_fig: bool = True, fig_name: str = None
+    ) -> None:
         """Plots the optimal value function based on learned Q values.
 
         Args:
@@ -190,6 +193,8 @@ class ControlStrategy:
                 and axes will be created.
             show: If True, call `plt.show()` after plotting.
         """
+        if not fig_name:
+            fig_name = f"figures/{self.__class__.__name__}.png"
         plot_df = self.get_plot_df()
 
         if ax is None:
@@ -203,7 +208,7 @@ class ControlStrategy:
             ax.set_ylabel("Player value")
             # Save an empty figure so test artifacts remain consistent.
             fig.tight_layout()
-            fig.savefig(f"{self.__class__.__name__}.png")
+            fig.savefig(fig_name)
             if show:
                 plt.show()
             return
@@ -219,7 +224,8 @@ class ControlStrategy:
         ax.set_ylabel("Player value")
 
         fig.tight_layout()
-        fig.savefig(f"{self.__class__.__name__}.png")
+        if save_fig:
+            fig.savefig(fig_name)
         if show:
             plt.show()
 
@@ -418,3 +424,26 @@ class LinearFunctionApproximationSarsaLambdaControlStrategy(ControlStrategy):
         # ATTN: Eligibility trace does not carry over to next episode.
         if new_state.is_terminal:
             self.e = np.zeros(36)
+
+    @override
+    def get_plot_df(self) -> pd.DataFrame:
+        """Plots the optimal value function based on the learned Q values.
+
+        Note since we don't have a physical table for function approximation, we'll
+        use learned weights to estimate instead.
+        """
+        states = itertools.product(range(1, 22), range(1, 11))
+        max_q = {
+            State(player_value=pv, dealer_value=dv, is_terminal=False): max(
+                self.estimate_q(
+                    State(player_value=pv, dealer_value=dv, is_terminal=False), action
+                )
+                for action in Action
+            )
+            for pv, dv in states
+        }
+        plot_df = pd.DataFrame()
+        for state, max_action_value in max_q.items():
+            player_value, dealer_value = state.player_value, state.dealer_value
+            plot_df.at[player_value, dealer_value] = max_action_value
+        return plot_df.sort_index().sort_index(axis=1)
