@@ -192,5 +192,6 @@ Action-values learned after 100000 episodes (λ=0.5 for TD-based methods):
 ![Deepmind RL Env API Simulation Sarsa Lambda](figures/Deepmind_RL_Env_SarsaLambdaControlStrategy.png)
 ![Deepmind RL Env API Simulation Linear Function Approximiation](figures/Deepmind_RL_Env_LinearFunctionApproximationSarsaLambdaControlStrategy.png)
 ![Deepmind RL Env API Simulation Monte Carlo Policy Gradient](figures/Deepmind_RL_Env_MonteCarloPolicyGradientControlStrategy.png)
+![Deepmind RL Env API Simulation Actor Critic Policy Gradient](figures/Deepmind_RL_Env_ActorCriticControlStrategy.png)
 
 Similar to earlier findings, fuction approximation method typically performs worse.

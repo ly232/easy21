@@ -127,7 +127,7 @@ class PolicyGradientPolicy(Policy):
         # Parameters learned through gradient asent.
         self.theta: Float[np.ndarray, "36"] = np.zeros(36)
 
-    def _softmax(self, state: State) -> dict[Action, float]:
+    def softmax(self, state: State) -> dict[Action, float]:
         preferences = {
             action: np.dot(self.theta, _feature_vector(state, action))
             for action in Action
@@ -145,7 +145,7 @@ class PolicyGradientPolicy(Policy):
 
         Uses softmax over parameterized preferences to sample actions.
         """
-        probabilities = self._softmax(state)
+        probabilities = self.softmax(state)
         actions = list(probabilities.keys())
         weights = list(probabilities.values())
         return random.choices(actions, weights=weights, k=1)[0]
@@ -157,7 +157,7 @@ class PolicyGradientPolicy(Policy):
         See slide 17 in https://davidstarsilver.wordpress.com/wp-content/uploads/2025/04/lecture-7-policy-gradient-methods.pdf
         """
         alpha = 0.01
-        probababilities = self._softmax(state)
+        probababilities = self.softmax(state)
         score = _feature_vector(state, action)
         for a in Action:
             score -= probababilities[a] * _feature_vector(state, a)
@@ -202,12 +202,10 @@ class ControlStrategy:
         """
         return self.q[state][action]
 
-    @final
     def reset(self, initial_state: State) -> None:
         """Resets the control strategy with the initial state."""
         self.trajectory = [initial_state]
 
-    @final
     def next_action(self) -> Action:
         """Decides the next action based on the current policy and latest observed state.
 
@@ -535,6 +533,110 @@ class MonteCarloPolicyGradientControlStrategy(ControlStrategy):
         plot_df = pd.DataFrame()
         for pv, dv in states:
             state = State(player_value=pv, dealer_value=dv, is_terminal=False)
-            action_probs = self.policy._softmax(state)
+            action_probs = self.policy.softmax(state)
+            plot_df.at[pv, dv] = action_probs[Action.HIT] - action_probs[Action.STICK]
+        return plot_df.sort_index().sort_index(axis=1)
+
+
+class ActorCriticControlStrategy(ControlStrategy):
+    """Implements the Actor-Critic control strategy.
+
+    See slide 25 & 32-34 in
+    https://davidstarsilver.wordpress.com/wp-content/uploads/2025/04/lecture-7-policy-gradient-methods.pdf
+
+    Note: it seems slide 32 has a typo: critic doesn't directly update actor's policy gradients, so
+    instead of delta_theta, the slide probably meant to say delta_v.
+
+    This class is a composition of a critic policy implemented by some other ControlStrategy,
+    plus its own implementation actor policy using parameterized policy gradient. Because of this
+    composition design, every base class method is overridden to proxy the event to the composed
+    critic strategy.
+    """
+
+    def __init__(self, critic: ControlStrategy) -> None:
+        """Initializes the Actor-Critic strategy with a given critic.
+
+        Args:
+            critic: The ControlStrategy to use as the critic (value estimator). In practice,
+                this should almost always be a function approximation based strategy like
+                LinearFunctionApproximationSarsaLambdaControlStrategy, because tabular based
+                strategy would defeat the purpose of using function approximiatino for policy
+                in the first place. However, class contract allows any ControlStrategy for
+                flexibility.
+        """
+        super().__init__()
+        self.policy = PolicyGradientPolicy()
+        self.critic = critic
+
+    @override
+    def observe(self, reward: int, new_state: State) -> None:
+        """Proxies observation to the critic strategy."""
+        super().observe(reward, new_state)
+        self.critic.observe(reward, new_state)
+
+    @override
+    def reset(self, initial_state):
+        super().reset(initial_state)
+        self.critic.reset(initial_state)
+
+    @override
+    def next_action(self):
+        _ = self.critic.next_action()  # triggers a state update in the critic.
+        return super().next_action()
+
+    @override
+    def post_action_hook(self) -> None:
+        # Note we do NOT invoke critic's post_action_hook here, because critic's next_action()
+        # is invoked separately.
+        super().post_action_hook()
+        if len(self.trajectory) >= 5:
+            self._policy_iteration()
+
+    @override
+    def _policy_iteration(self) -> None:
+        """Run one round of policy iteration.
+
+        See slide 25 in
+        https://davidstarsilver.wordpress.com/wp-content/uploads/2025/04/lecture-7-policy-gradient-methods.pdf
+        """
+        old_state, old_action, reward, new_state, new_action = (
+            self.trajectory[-5],
+            self.trajectory[-4],
+            self.trajectory[-3],
+            self.trajectory[-2],
+            self.trajectory[-1],
+        )
+
+        # Compute TD error (therefore also advantage function). See slide 31.
+        qs = {
+            action: {
+                old_state: self.critic.estimate_q(old_state, action),
+                new_state: self.critic.estimate_q(new_state, action),
+            }
+            for action in Action
+        }  # action -> old state float, new state float
+        probabilities = {
+            old_state: self.policy.softmax(old_state),
+            new_state: self.policy.softmax(new_state),
+        }
+        vs: dict[State, float] = {}
+        for action in qs:
+            for state in qs[action]:
+                if state not in vs:
+                    vs[state] = 0.0
+                vs[state] += probabilities[state][action] * qs[action][state]
+        td_error = reward + vs[new_state] - vs[old_state]
+
+        # Perform gradient ascent on the actor policy gradient.
+        self.policy.update(old_state, old_action, td_error)
+
+    @override
+    def get_plot_df(self):
+        """Overrides plotting logic to show action probabilities."""
+        states = itertools.product(range(1, 22), range(1, 11))
+        plot_df = pd.DataFrame()
+        for pv, dv in states:
+            state = State(player_value=pv, dealer_value=dv, is_terminal=False)
+            action_probs = self.policy.softmax(state)
             plot_df.at[pv, dv] = action_probs[Action.HIT] - action_probs[Action.STICK]
         return plot_df.sort_index().sort_index(axis=1)
