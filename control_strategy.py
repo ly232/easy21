@@ -16,6 +16,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
 import itertools
+import abc
 
 
 # Hyperparameters.
@@ -50,26 +51,49 @@ class Action(IntEnum):
     STICK = 1
 
 
-#
-# Module-level factory methods.
-# Using a top-level function (instead of a local lambda) makes the
-# defaultdict pickling-safe.
-#
-def _initial_action_distribution() -> dict:
-    return {Action.HIT: 0.5, Action.STICK: 0.5}
-
-
 def _float_defaultdict() -> dict[Action, float]:
     return defaultdict(float)
 
 
-class Policy:
-    """Defines a policy mapping states to proability distribution of actions."""
+@cache
+def _feature_vector(state: State, action: Action) -> Float[np.ndarray, "36"]:
+    """Generates the feature vector for the given state and action."""
+    dealer_cuboids = [(1, 4), (4, 7), (7, 10)]
+    player_cuboids = [(1, 6), (4, 9), (7, 12), (10, 15), (13, 18), (16, 21)]
+    features = list(product(dealer_cuboids, player_cuboids, Action))
+    feature_vector = np.zeros(len(features), dtype=float)
+    for i, feature in enumerate(features):
+        (d_start, d_end), (p_start, p_end), a = feature
+        if (
+            d_start <= state.dealer_value <= d_end
+            and p_start <= state.player_value <= p_end
+            and a == action
+        ):
+            feature_vector[i] = 1.0
+    return feature_vector
+
+
+class Policy(abc.ABC):
+    """Base class for policies."""
+
+    @abc.abstractmethod
+    def sample(self, state: State) -> Action:
+        """Samples an action based on the policy's distribution for the given state."""
+        pass
+
+
+class ValuedBasedPolicy(Policy):
+    """Defines a policy mapping states to proability distribution of actions.
+
+    Use this class for value-based control strategies, as opposed to policy gradient
+    based or actor-critic based control strategies.
+    """
 
     def __init__(self) -> None:
         # Links back to owner control strategy to access Q values later.
         self.strategy: "ControlStrategy" = None
 
+    @override
     def sample(self, state: State) -> Action:
         """Samples an action based on the policy's distribution for the given state.
 
@@ -82,7 +106,7 @@ class Policy:
         }
         best_action = max(action_values, key=action_values.get)
         epsilon = 0.01
-        if state in self.strategy.n:
+        if state in self.strategy.n:  # For tabular methods.
             epsilon = N0 / (N0 + max(self.strategy.n[state].values()))
         m = len(Action)
         probabilities = {
@@ -96,11 +120,55 @@ class Policy:
         return random.choices(actions, weights=weights, k=1)[0]
 
 
+class PolicyGradientPolicy(Policy):
+    """Defines a policy using parameterized policy gradient."""
+
+    def __init__(self) -> None:
+        # Parameters learned through gradient asent.
+        self.theta: Float[np.ndarray, "36"] = np.zeros(36)
+
+    def _softmax(self, state: State) -> dict[Action, float]:
+        preferences = {
+            action: np.dot(self.theta, _feature_vector(state, action))
+            for action in Action
+        }
+        max_pref = max(preferences.values())
+        exp_preferences = {
+            action: np.exp(preferences[action] - max_pref) for action in Action
+        }  # Subtract max for numerical stability.
+        sum_exp_prefs = sum(exp_preferences.values())
+        return {action: exp_preferences[action] / sum_exp_prefs for action in Action}
+
+    @override
+    def sample(self, state: State) -> Action:
+        """Samples an action based on the policy's distribution for the given state.
+
+        Uses softmax over parameterized preferences to sample actions.
+        """
+        probabilities = self._softmax(state)
+        actions = list(probabilities.keys())
+        weights = list(probabilities.values())
+        return random.choices(actions, weights=weights, k=1)[0]
+
+    def update(self, state: State, action: Action, gain: float) -> None:
+        """Updates the policy parameters.
+
+        This assumes using softmax policy, since we have discrete action space.
+        See slide 17 in https://davidstarsilver.wordpress.com/wp-content/uploads/2025/04/lecture-7-policy-gradient-methods.pdf
+        """
+        alpha = 0.01
+        probababilities = self._softmax(state)
+        score = _feature_vector(state, action)
+        for a in Action:
+            score -= probababilities[a] * _feature_vector(state, a)
+        self.theta += alpha * gain * score
+
+
 class ControlStrategy:
     """Base class for control strategy."""
 
     def __init__(self) -> None:
-        self.policy = Policy()
+        self.policy = ValuedBasedPolicy()
         self.policy.strategy = self
 
         # Denotes the current trajectory. Note that if the same strategy object is reused over
@@ -243,7 +311,7 @@ class MonteCarloControlStrategy(ControlStrategy):
 
     def __init__(self) -> None:
         super().__init__()
-        self.policy = Policy()
+        self.policy = ValuedBasedPolicy()
         self.policy.strategy = self
 
     def _policy_iteration(self) -> None:
@@ -283,7 +351,7 @@ class SarsaLambdaControlStrategy(ControlStrategy):
 
     def __init__(self, lmda: float) -> None:
         super().__init__()
-        self.policy = Policy()
+        self.policy = ValuedBasedPolicy()
         self.policy.strategy = self
 
         # Sarsa(λ) control parameters.
@@ -347,14 +415,14 @@ class LinearFunctionApproximationSarsaLambdaControlStrategy(ControlStrategy):
 
     def __init__(self, lmda: float) -> None:
         super().__init__()
-        self.policy = Policy()
+        self.policy = ValuedBasedPolicy()
         self.policy.strategy = self
         self.lmda = lmda
 
         # Unlike MC and Sarsa, we don't explicitly materialize tables for Q and N for function
         # approximation strategy. Instead we use a weight vector to estimate action-value function,
         # where the weights are trained via gradient descent using a linear model against one-hot
-        # encoded feature vectors (see self._feature_vector below).
+        # encoded feature vectors (see _feature_vector).
         self.weights: Float[np.ndarray, "36"] = np.zeros(36)
 
         # Eligibility trace vector. Note that unlike the tabular Sarsa(λ) where eligibility tracks the
@@ -362,27 +430,10 @@ class LinearFunctionApproximationSarsaLambdaControlStrategy(ControlStrategy):
         # vector space, we just need to track the eligibility in that vector space.
         self.e: Float[np.ndarray, "36"] = np.zeros(36)
 
-    @cache
-    def _feature_vector(self, state: State, action: Action) -> Float[np.ndarray, "36"]:
-        """Generates the feature vector for the given state and action."""
-        dealer_cuboids = [(1, 4), (4, 7), (7, 10)]
-        player_cuboids = [(1, 6), (4, 9), (7, 12), (10, 15), (13, 18), (16, 21)]
-        features = list(product(dealer_cuboids, player_cuboids, Action))
-        feature_vector = np.zeros(len(features), dtype=float)
-        for i, feature in enumerate(features):
-            (d_start, d_end), (p_start, p_end), a = feature
-            if (
-                d_start <= state.dealer_value <= d_end
-                and p_start <= state.player_value <= p_end
-                and a == action
-            ):
-                feature_vector[i] = 1.0
-        return feature_vector
-
     @override
     def estimate_q(self, state: State, action: Action) -> float:
         """Estimates the action-value for the given state and action using current weights."""
-        phi = self._feature_vector(state, action)
+        phi = _feature_vector(state, action)
         return float(np.dot(self.weights, phi))
 
     @override
@@ -414,11 +465,10 @@ class LinearFunctionApproximationSarsaLambdaControlStrategy(ControlStrategy):
             )
             - self.estimate_q(old_state, old_action)
         )
-        grad = self._feature_vector(old_state, old_action)
+        grad = _feature_vector(old_state, old_action)
         self.e = self.lmda * self.e + grad
         alpha = 0.01  # Fixed small step size for TD methods.
         delta_w = alpha * delta * self.e
-        # print(delta_w)
         self.weights += delta_w
 
         # ATTN: Eligibility trace does not carry over to next episode.
@@ -446,4 +496,45 @@ class LinearFunctionApproximationSarsaLambdaControlStrategy(ControlStrategy):
         for state, max_action_value in max_q.items():
             player_value, dealer_value = state.player_value, state.dealer_value
             plot_df.at[player_value, dealer_value] = max_action_value
+        return plot_df.sort_index().sort_index(axis=1)
+
+
+class MonteCarloPolicyGradientControlStrategy(ControlStrategy):
+    """Implements the REINFORCE policy gradient control strategy with Monte Carlo.
+
+    See slide 21 in https://davidstarsilver.wordpress.com/wp-content/uploads/2025/04/lecture-7-policy-gradient-methods.pdf
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.policy = PolicyGradientPolicy()
+
+    @override
+    def observe(self, reward: int, new_state: State) -> None:
+        """Update control parameters for terminal states only."""
+        super().observe(reward, new_state)
+
+        if not new_state.is_terminal:
+            return
+        # Apply MC policy iteration on completed episode.
+        self._policy_iteration()
+
+    def _policy_iteration(self) -> None:
+        """Run gradient ascent on the policy."""
+        # Policy evaluation using every-visit Monte Carlo.
+        trajectory = self.trajectory
+        gain = trajectory[-2]  # for easy21, only the final reward is non-zero.
+        for i in range(0, len(trajectory) - 3, 3):
+            state, action = trajectory[i], trajectory[i + 1]
+            self.policy.update(state, action, gain)
+
+    @override
+    def get_plot_df(self):
+        """Overrides plotting logic to show action probabilities."""
+        states = itertools.product(range(1, 22), range(1, 11))
+        plot_df = pd.DataFrame()
+        for pv, dv in states:
+            state = State(player_value=pv, dealer_value=dv, is_terminal=False)
+            action_probs = self.policy._softmax(state)
+            plot_df.at[pv, dv] = action_probs[Action.HIT] - action_probs[Action.STICK]
         return plot_df.sort_index().sort_index(axis=1)

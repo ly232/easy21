@@ -9,6 +9,7 @@ from control_strategy import (
     MonteCarloControlStrategy,
     SarsaLambdaControlStrategy,
     LinearFunctionApproximationSarsaLambdaControlStrategy,
+    MonteCarloPolicyGradientControlStrategy,
     State,
     Action,
 )
@@ -193,3 +194,20 @@ def test_mse_sarsa_lambda_strategy(use_tabular) -> None:
         if use_tabular
         else "SarsaLambdaControlStrategy_FuncApprox_Final_MSE.png"
     )
+
+
+#
+# Test Monte Carlo policy gradient control strategy (REINFORCE).
+#
+def test_episode_monte_carlo_policy_gradient_strategy() -> None:
+    monte_carlo_strategy = MonteCarloPolicyGradientControlStrategy()
+    filepath = Path("MonteCarloPolicyGradientControlStrategy.pkl")
+    if filepath.exists():
+        with open(filepath, "rb") as f:
+            monte_carlo_strategy = pickle.load(f)
+    else:
+        for _ in tqdm.tqdm(range(100000)):
+            episode = Episode(strategy=monte_carlo_strategy)
+            episode.run()
+        monte_carlo_strategy.persist()
+    monte_carlo_strategy.plot_optimal_value(show=False)

@@ -20,6 +20,9 @@ rm SarsaLambdaControlStrategy.pkl & uv run pytest episode_test.py::test_episode_
 
 # Run Sarsa Lambda control for MSE plot:
 uv run pytest episode_test.py::test_mse_sarsa_lambda_strategy -s
+
+# Run policy gradient REINFORCE algorithm:
+rm MonteCarloPolicyGradientControlStrategy.pkl & uv run pytest episode_test.py::test_episode_monte_carlo_policy_gradient_strategy -s
 ```
 
 ## Code Structure
@@ -166,6 +169,12 @@ Key implementation notes:
 Function approximation appears to perform better initially, but worse in the long run, when comparing against the tabular method. This is expected because tabular methods initially don't explore much, so most estimates are zero, whereas function approximation has better generalizations initially, which gave better estimates initially even for unvisited states. But as we get more episodes, tabular methods visit more states and their estimates are more accuate.
 
 It appears always doing random policy without policy improvement during policy iteration actually converges faster for TD-based tabular and function approximation methods for initial iterations. One hypothesis is that initial TD errors have higher bias and therefore random policies might give more exploration than exploitation. But as we gather more episodes we do expect random policy error to stop improving and perform worse than policy improvement strategies.
+
+## Policy Gradient methods
+
+`Policy` class is further subclassed into `ValuedBasedPolicy` and `PolicyGradientPolicy`. The latter takes responsibility of learning parameters directly for the policy. `ControlStrategy` implementations may opt to impelment policy gradient famliy of algorithms, in which case the dependency in policy can be `PolicyGradientPolicy` instead of `ValuedBasedPolicy`. See `MonteCarloPolicyGradientControlStrategy` for example. Simulation results (note 0 means HIT, 1 means STICK):
+
+![REINFORCE](figures/MonteCarloPolicyGradientControlStrategy.png)
 
 ## Deepmind RL Environment API Integration
 
