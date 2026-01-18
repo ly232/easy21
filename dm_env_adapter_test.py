@@ -16,6 +16,7 @@ _CONTROL_STRATEGIES = [
     control_strategy.MonteCarloControlStrategy(),
     control_strategy.SarsaLambdaControlStrategy(lmda=0.5),
     control_strategy.LinearFunctionApproximationSarsaLambdaControlStrategy(lmda=0.5),
+    control_strategy.MonteCarloPolicyGradientControlStrategy(),
 ]
 
 
