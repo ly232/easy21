@@ -1,111 +1,74 @@
-# 🚀 Reinforcement Learning Algorithm Cheatsheet (Full Technical Edition)
+# 🚀 Reinforcement Learning Algorithm Cheatsheet
 
-A complete guide to RL algorithms, update rules, and David Silver RL Course references.
+A technical one-pager based on the **David Silver RL Course (UCL/DeepMind)**.
 
 ---
 
 ## 🟢 1. Model-Free Prediction (Value Estimation)
-*Goal: Estimate $v_\pi$ or $q_\pi$ for a fixed policy.*
+*Goal: Estimate the value function for a fixed policy.*
 
-| Algorithm | Setting | Update Timing | Update Rule (Equation) |
-| :--- | :--- | :--- | :--- |
-| **MC Prediction** | Episodic | End of Episode | $V(S_t) \leftarrow V(S_t) + \alpha [G_t - V(S_t)]$ |
-| **TD(0)** | Continuing | Every Step | $V(S_t) \leftarrow V(S_t) + \alpha [R_{t+1} + \gamma V(S_{t+1}) - V(S_t)]$ |
-| **Semi-Grad TD** | Function Appx | Every Step | $\mathbf{w} \leftarrow \mathbf{w} + \alpha [R + \gamma \hat{v}(S', \mathbf{w}) - \hat{v}(S, \mathbf{w})] \nabla \hat{v}(S, \mathbf{w})$ |
-
-
+| Algorithm | Setting | Timing | Update Rule (Image) | Lecture |
+| :--- | :--- | :--- | :--- | :--- |
+| **MC Prediction** | Episodic | Offline | ![MC](https://latex.codecogs.com/svg.latex?V(S_t)%5Cleftarrow%20V(S_t)%20+%20%5Calpha%20%5BG_t%20-%20V(S_t)%5D) | L4 |
+| **TD(0)** | Continuing | Online | ![TD](https://latex.codecogs.com/svg.latex?V(S_t)%5Cleftarrow%20V(S_t)%20+%20%5Calpha%20%5BR_%7Bt+1%7D%20+%20%5Cgamma%20V(S_%7Bt+1%7D)%20-%20V(S_t)%5D) | L4 |
+| **Semi-Grad TD** | Linear Appx | Online | ![SG](https://latex.codecogs.com/svg.latex?%5Cmathbf%7Bw%7D%5Cleftarrow%5Cmathbf%7Bw%7D+%5Calpha%5BR+%5Cgamma%20%5Chat%7Bv%7D(S%27%2C%5Cmathbf%7Bw%7D)-%5Chat%7Bv%7D(S%2C%5Cmathbf%7Bw%7D)%5D%5Cnabla%5Chat%7Bv%7D(S%2C%5Cmathbf%7Bw%7D)) | L6 |
 
 ---
 
 ## 🔵 2. Model-Free Control (Policy Optimization)
-*Goal: Find the optimal policy $\pi_*$.*
+*Goal: Find the optimal policy through interaction.*
 
-| Algorithm | Policy Type | Update Rule (Target Calculation) | David Silver |
+| Algorithm | Policy | Target Logic (The "Lookahead") | Lecture |
 | :--- | :--- | :--- | :--- |
-| **Sarsa** | On-Policy | $Q(S,A) \leftarrow Q(S,A) + \alpha [R + \gamma Q(S',A') - Q(S,A)]$ | L5 |
-| **Q-Learning** | Off-Policy | $Q(S,A) \leftarrow Q(S,A) + \alpha [R + \gamma \max_{a} Q(S',a) - Q(S,A)]$ | L5 |
-| **Expected Sarsa**| On-Policy | $Q(S,A) \leftarrow Q(S,A) + \alpha [R + \gamma \sum_{a} \pi(a|S') Q(S',a) - Q(S,A)]$ | L5 |
-
-
+| **Sarsa** | On-Policy | ![Sarsa](https://latex.codecogs.com/svg.latex?R%20+%20%5Cgamma%20Q(S%27%2C%20A%27)) | L5 |
+| **Q-Learning** | Off-Policy | ![QL](https://latex.codecogs.com/svg.latex?R%20+%20%5Cgamma%20%5Cmax_a%20Q(S%27%2C%20a)) | L5 |
+| **Expected Sarsa**| On-Policy | ![ES](https://latex.codecogs.com/svg.latex?R%20+%20%5Cgamma%20%5Csum_a%20%5Cpi(a%7CS%27)%20Q(S%27%2C%20a)) | L5 |
 
 ---
 
 ## 🟡 3. Model-Based & Planning
-*Goal: Use $P(s'|s,a)$ and $R(s,a)$ to compute values.*
+*Goal: Use environment dynamics $P$ and $R$ to compute values.*
 
-| Algorithm | Bellman Equation Used | Purpose |
-| :--- | :--- | :--- |
-| **Value Iteration** | $v_{k+1}(s) = \max_{a} \sum_{s', r} p(s',r|s,a) [r + \gamma v_k(s')]$ | Optimal Control |
-| **Policy Eval** | $v_{k+1}(s) = \sum_{a} \pi(a|s) \sum_{s', r} p(s',r|s,a) [r + \gamma v_k(s')]$ | Prediction |
-
-
-
----
-
-## 🟠 4. The Bridge: Eligibility Traces ($TD(\lambda)$)
-*Goal: Unify TD and MC. Updates states based on how recently/frequently they were visited.*
-
-**Trace Update:** $E_t(s) = \gamma \lambda E_{t-1}(s) + \mathbb{1}(S_t = s)$
-**Value Update:** $V(S_t) \leftarrow V(S_t) + \alpha \delta_t E_t(S_t)$
-
-| Algorithm | $\lambda$ Value | Behavior | David Silver |
+| Algorithm | Usage | Equation | Lecture |
 | :--- | :--- | :--- | :--- |
-| **TD(0)** | $\lambda = 0$ | Standard TD (Immediate bootstrap) | L4 |
-| **MC** | $\lambda = 1$ | Standard Monte Carlo (Full return) | L4 |
-
-
+| **Value Iteration** | Control | ![VI](https://latex.codecogs.com/svg.latex?v_%7Bk+1%7D(s)%20%3D%20%5Cmax_a%20%5Csum_%7Bs%27%2Cr%7D%20p(s%27%2Cr%7Cs%2Ca)%5Br+%5Cgamma%20v_k(s%27)%5D) | L3 |
+| **Policy Eval** | Prediction | ![PE](https://latex.codecogs.com/svg.latex?v_%7Bk+1%7D(s)%20%3D%20%5Csum_a%20%5Cpi(a%7Cs)%20%5Csum_%7Bs%27%2Cr%7D%20p(s%27%2Cr%7Cs%2Ca)%5Br+%5Cgamma%20v_k(s%27)%5D) | L3 |
 
 ---
 
-## 🟣 5. Continuing Tasks (Average Reward)
-*Goal: Maximize reward per time step where $G_t$ is not discounted.*
+## 🟠 4. The Bridge: Eligibility Traces
+*Goal: Unify TD and MC via the weight $\lambda$.*
 
-**Average Reward TD Error:**
-$$\delta_t = R_{t+1} - \bar{R}_t + \hat{v}(S_{t+1}, \mathbf{w}) - \hat{v}(S_t, \mathbf{w})$$
+**Trace Update:** ![Trace](https://latex.codecogs.com/svg.latex?E_t(s)%20%3D%20%5Cgamma%5Clambda%20E_%7Bt-1%7D(s)%20+%20%5Cmathbb%7B1%7D(S_t%3Ds))  
+**Mechanic:** Updates states based on frequency and recency. $\lambda=0$ is TD; $\lambda=1$ is MC.
 
-| Algorithm | Action Space | Policy Gradient Update ($\nabla_\theta J(\theta)$) |
+---
+
+## 🟣 5. Average Reward (Continuing Tasks)
+*Goal: Maximize reward per time step in non-terminating environments.*
+
+**TD Error:** ![AvgErr](https://latex.codecogs.com/svg.latex?%5Cdelta_t%20%3D%20R_%7Bt+1%7D%20-%20%5Cbar%7BR%7D_t%20+%20%5Chat%7Bv%7D(S_%7Bt+1%7D%2C%20%5Cmathbf%7Bw%7D)%20-%20%5Chat%7Bv%7D(S_t%2C%20%5Cmathbf%7Bw%7D))
+
+| Algorithm | Policy Gradient Update | Lecture |
 | :--- | :--- | :--- |
-| **Softmax A-C** | Discrete | $\delta_t \nabla_\theta \ln \pi(A_t|S_t, \theta)$ |
-| **Gaussian A-C** | Continuous | $\delta_t \nabla_\theta \ln \mathcal{N}(A_t | \mu(S_t), \sigma(S_t))$ |
+| **Softmax A-C** | ![Softmax](https://latex.codecogs.com/svg.latex?%5Cdelta_t%20%5Cnabla_%5Ctheta%20%5Cln%20%5Cpi(A_t%7CS_t%2C%20%5Ctheta)) | L7 |
+| **Gaussian A-C** | ![Gaussian](https://latex.codecogs.com/svg.latex?%5Cdelta_t%20%5Cnabla_%5Ctheta%20%5Cln%20%5Cmathcal%7BN%7D(A_t%7C%5Cmu%2C%5Csigma)) | L7 |
 
+---
 
+## 📉 6. Convergence Properties
+
+| Algorithm | Tabular | Linear Function Appx | David Silver |
+| :--- | :--- | :--- | :--- |
+| **DP** | Converges to $v_*$ | N/A | L3 |
+| **MC** | Converges to $v_*$ | Converges to Min MSE | L4 |
+| **TD / Sarsa** | Converges to $v_*$ | Converges to TD Fixed Point | L4/L6 |
+| **Q-Learning** | Converges to $q_*$ | **May Diverge** (Deadly Triad) | L5/L6 |
 
 ---
 
 ## 🧠 Core Definitions
-* **On-Policy:** Updates $Q(s,a)$ based on the actual next action $A'$ taken.
-* **Off-Policy:** Updates $Q(s,a)$ based on the hypothetical best action $\max Q(s',a)$.
-* **Bootstrapping:** Using an estimate to update an estimate ($R + \gamma \hat{V}$).
-* **The Deadly Triad:** Function Approximation + Bootstrapping + Off-Policy = Risk of Divergence.
-
-## 📉 6. Convergence Properties & Stability
-*Goal: Understanding where and why algorithms succeed or fail.*
-
-| Algorithm Group | Setting | Convergence Guarantee | Notes |
-| :--- | :--- | :--- | :--- |
-| **Dynamic Programming** | Tabular / Model Known | **Optimal ($v_*$)** | Guaranteed to find the unique optimal solution. |
-| **Monte Carlo** | Tabular / Model Free | **Optimal ($v_*$)** | Unbiased but high variance; slow to converge. |
-| **TD(0) / Sarsa** | Tabular / Model Free | **Optimal ($v_*$)** | Converges under Robbins-Monro conditions. |
-| **Linear TD / Sarsa** | Function Appx | **TD Fixed Point** | Converges near optimal, but limited by feature quality. |
-| **Deep RL (DQN/AC)** | Non-Linear Appx | **None** | Can diverge or oscillate; requires stability tricks (Experience Replay). |
-
----
-
-### ⚠️ The Convergence "Safe Zone"
-To avoid divergence, always check if your setup falls into the **"Deadly Triad."** If all three are present, convergence is not guaranteed:
-1. **Function Approximation** (Neural Networks / Linear features)
-2. **Bootstrapping** (TD, Sarsa, DP)
-3. **Off-Policy Learning** (Q-Learning, Gradient-TD)
-
----
-
-### 🎓 David Silver Lecture Mapping Recap
-* **L1 & L2:** Intro & MDPs (Foundations)
-* **L3:** Planning by Dynamic Programming (Value/Policy Iteration)
-* **L4:** Model-Free Prediction (MC & TD)
-* **L5:** Model-Free Control (Sarsa & Q-Learning)
-* **L6:** Value Function Approximation (Linear/Neural Nets)
-* **L7:** Policy Gradient Methods (Actor-Critic)
-* **L8:** Integrating Learning and Planning (Dyna-Q)
-* **L9:** Exploration and Exploitation (Multi-armed Bandits)
-* **L10:** Case Study: AlphaGo (RL in Practice)
+* **On-Policy:** Learn about the policy you are executing (Sarsa, AC).
+* **Off-Policy:** Learn about optimal policy while exploring (Q-Learning).
+* **Bootstrapping:** Updating an estimate using an estimate ($R + \gamma \hat{V}$).
+* **The Deadly Triad:** Function Approximation + Bootstrapping + Off-Policy.
